@@ -1,9 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { askPortfolio, searchPortfolio } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { embedTextLocally } from "@/lib/local-embeddings";
+import {
+  clearHistory,
+  loadHistory,
+  retrievalQuery,
+  saveHistory,
+  HISTORY_FOR_LLM,
+  type ChatTurn,
+} from "@/lib/chat-history";
+
 import {
   Sheet,
   SheetContent,
