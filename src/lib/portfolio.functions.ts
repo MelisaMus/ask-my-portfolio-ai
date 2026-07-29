@@ -434,7 +434,24 @@ function extractiveAnswer(question: string, sources: MatchRow[], reason?: string
 
 }
 
+/**
+ * Zitat-Korrektur: LLMs erfinden gern Absatznummern ("[3, Absatz 1]", obwohl
+ * Quelle 3 Absatz 9 ist). Wir kennen die echte Nummer aus den Metadaten und
+ * überschreiben sie – unbekannte Quellennummern werden entfernt.
+ */
+function fixCitations(answer: string, sources: MatchRow[]): string {
+  return answer.replace(/\[\s*(\d+)\s*(?:,\s*Absatz\s*(\d+)\s*)?\]/gi, (match, refStr, paraStr) => {
+    const ref = Number(refStr);
+    const src = sources[ref - 1];
+    if (!src) return ""; // Verweis auf eine Quelle, die es nicht gibt
+    if (!paraStr) return `[${ref}]`;
+    // Absatznummer immer aus den Metadaten, nie aus dem Modell.
+    return `[${ref}, Absatz ${src.chunk_index + 1}]`;
+  });
+}
+
 export const askPortfolio = createServerFn({ method: "POST" })
+
   .inputValidator((data: unknown) => AskSchema.parse(data))
   .handler(async ({ data }) => {
     // 0. Rate-Limit pro IP: schützt vor unbeabsichtigten LLM-Kosten.
