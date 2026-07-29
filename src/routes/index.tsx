@@ -31,6 +31,7 @@ type Source = {
   essay_id: string;
   title: string;
   source: string | null;
+  chunk_index: number;
   excerpt: string;
   similarity: number;
 };
