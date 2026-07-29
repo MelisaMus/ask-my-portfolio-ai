@@ -296,7 +296,10 @@ function extractiveAnswer(question: string, sources: MatchRow[]): string {
 export const askPortfolio = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => AskSchema.parse(data))
   .handler(async ({ data }) => {
-    const key = process.env.LOVABLE_API_KEY;
+    // Eigener OpenAI-Key hat Vorrang; sonst Fallback auf das Lovable AI Gateway.
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const key = openaiKey ?? process.env.LOVABLE_API_KEY;
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
 
