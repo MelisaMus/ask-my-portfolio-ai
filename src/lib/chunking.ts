@@ -52,13 +52,19 @@ export function chunkText(content: string): string[] {
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
 
-  // Schritt 2: kurze Absätze nach vorne zusammenziehen.
+  // Schritt 2: kurze Absätze zusammenziehen.
+  // Zwei Fälle, beide erzeugen sonst inhaltsarme Chunks:
+  //   a) der VORHERIGE Chunk ist zu kurz (Überschrift, Anmoderation)
+  //   b) der AKTUELLE Absatz ist zu kurz (Kontaktzeile, Kasten, Einzeiler)
+  // In beiden Fällen wird an den vorherigen Chunk angehängt, solange die
+  // Obergrenze eingehalten wird.
   const merged: string[] = [];
   for (const paragraph of paragraphs) {
     const previous = merged[merged.length - 1];
+    const tooShort = previous !== undefined && (previous.length < MIN_CHUNK_CHARS || paragraph.length < MIN_CHUNK_CHARS);
     if (
       previous !== undefined &&
-      previous.length < MIN_CHUNK_CHARS &&
+      tooShort &&
       previous.length + paragraph.length + 2 <= MAX_CHUNK_CHARS
     ) {
       merged[merged.length - 1] = `${previous}\n\n${paragraph}`;
@@ -66,6 +72,7 @@ export function chunkText(content: string): string[] {
       merged.push(paragraph);
     }
   }
+
 
   // Letzter Chunk könnte noch zu kurz sein -> an den vorherigen hängen.
   if (merged.length > 1) {
