@@ -57,6 +57,9 @@ function Index() {
   const [answer, setAnswer] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
+  // Konfigurierbarer Similarity-Threshold: Treffer darunter werden verworfen.
+  const [threshold, setThreshold] = useState(0.3);
+  const [retrieved, setRetrieved] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // Expanded full-essay content, keyed by essay_id
@@ -83,8 +86,9 @@ function Index() {
     try {
       if (testMode) {
         // Retrieval-only: skip the LLM, show raw top-5 chunks + similarity scores.
-        const res = await search({ data: { question } });
+        const res = await search({ data: { question, threshold } });
         setMatches(res.matches);
+        setRetrieved(res.retrieved);
       } else {
         const res = await ask({ data: { question } });
         setAnswer(res.answer);
@@ -191,6 +195,24 @@ function Index() {
             Test-Modus (Top-5 Chunks ohne LLM)
           </label>
         </div>
+        {testMode && (
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <label htmlFor="threshold" className="whitespace-nowrap">
+              Similarity-Threshold
+            </label>
+            <input
+              id="threshold"
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+              className="w-48"
+            />
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{threshold.toFixed(2)}</span>
+          </div>
+        )}
       </form>
 
       {error && (
@@ -199,10 +221,16 @@ function Index() {
         </p>
       )}
 
+      {testMode && retrieved > 0 && matches.length === 0 && (
+        <p className="mt-6 rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+          Kein Treffer über dem Threshold {threshold.toFixed(2)} ({retrieved} Chunks geprüft).
+        </p>
+      )}
+
       {matches.length > 0 && (
         <section className="mt-8">
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Top-5 Retrieval-Ergebnisse
+            Retrieval-Ergebnisse · {matches.length}/{retrieved} über Threshold {threshold.toFixed(2)}
           </h2>
           <ol className="space-y-3">
             {matches.map((m, i) => (
