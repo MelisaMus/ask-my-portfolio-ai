@@ -269,6 +269,38 @@ function Index() {
         </p>
       </header>
 
+      {/* Chatverlauf (eine Unterhaltung, nur in diesem Browser gespeichert) */}
+      {history.length > 0 && (
+        <section className="mb-8">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Verlauf · {history.length} {history.length === 1 ? "Frage" : "Fragen"}
+              <span className="ml-1 normal-case">
+                (die letzten {HISTORY_FOR_LLM} gehen als Kontext mit)
+              </span>
+            </h2>
+            <button
+              type="button"
+              onClick={resetConversation}
+              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              Neu starten
+            </button>
+          </div>
+          <ol className="space-y-3">
+            {history.map((t) => (
+              <li key={t.id} className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <p className="font-medium text-foreground">{t.question}</p>
+                <p className="mt-1 whitespace-pre-wrap leading-relaxed text-muted-foreground">
+                  {t.answer}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+
       <form onSubmit={onAsk} className="space-y-3">
         <textarea
           value={question}
