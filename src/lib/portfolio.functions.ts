@@ -516,18 +516,26 @@ export const askPortfolio = createServerFn({ method: "POST" })
       };
     }
 
-    // 3. Build a grounded prompt and ask the LLM to cite by [n]
+    // 3. Grounded Prompt: Jeder Ausschnitt trägt seine ECHTE Absatznummer,
+    //    damit das LLM sie nicht erfinden muss ("[3, Absatz 1]" obwohl es
+    //    Absatz 9 war). Die Nummern werden danach zusätzlich validiert.
     const context = sources
-      .map((s, i) => `[${i + 1}] "${s.title}"${s.source ? ` (${s.source})` : ""}\n${s.content}`)
+      .map((s, i) => {
+        const total = totals[s.essay_id] ?? 0;
+        const para = `Absatz ${s.chunk_index + 1}${total ? ` von ${total}` : ""}`;
+        return `[${i + 1}] "${s.title}"${s.source ? ` (${s.source})` : ""} · ${para}\n${s.content}`;
+      })
       .join("\n\n---\n\n");
 
     const systemPrompt =
       "Du beantwortest Fragen ausschließlich auf Grundlage der bereitgestellten Textausschnitte aus einer Essay-Sammlung. " +
       "Antworte auf Deutsch, präzise und in 2-5 Sätzen. Zitiere die verwendeten Quellen mit [1], [2] etc. " +
-      "Nutze dabei die mitgelieferte Absatz-Information, z. B. [1, Absatz 3], wenn du auf einen konkreten Absatz verweist. " +
+      "Die Absatznummer steht in der Kopfzeile jedes Ausschnitts; wenn du sie nennst, übernimm sie EXAKT " +
+      "(z. B. [3, Absatz 9]). Erfinde niemals eine andere Absatznummer und nenne im Zweifel nur [3]. " +
       "Der bisherige Gesprächsverlauf dient nur dazu, Follow-up-Fragen und Bezüge zu verstehen – " +
       "inhaltliche Aussagen stützt du weiterhin ausschließlich auf die Textausschnitte. " +
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
+
 
     // Bisherige Turns als echte Chat-Nachrichten -> Follow-ups verstehen Bezüge.
     const historyMessages = (data.history ?? []).flatMap((t) => [
