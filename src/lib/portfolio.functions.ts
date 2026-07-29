@@ -19,16 +19,21 @@ import { z } from "zod";
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1";
 const CHAT_MODEL = "google/gemini-3.6-flash";
+/** Eigener OpenAI-Key (Secret) – wird bevorzugt, umgeht das Workspace-Limit. */
+const OPENAI_URL = "https://api.openai.com/v1";
+const OPENAI_MODEL = "gpt-4o-mini";
 /** Dimension des lokalen MiniLM-Modells – muss zu vector(384) passen. */
 const EMBEDDING_DIM = 384;
 
 /** Map gateway HTTP errors to messages the UI can show directly. */
 function gatewayError(status: number, body: string): Error {
   if (status === 429) return new Error("Zu viele Anfragen an die KI – bitte kurz warten und erneut versuchen.");
+  if (status === 401) return new Error("Der hinterlegte OpenAI-API-Key ist ungültig.");
   if (status === 402 || status === 403)
-    return new Error("KI-Guthaben/Limit des Workspace ist erreicht. Bitte unter Settings → Plans & credits anheben.");
+    return new Error("KI-Guthaben/Limit ist erreicht. Bitte Guthaben aufladen.");
   return new Error(`KI-Dienst-Fehler ${status}: ${body.slice(0, 200)}`);
 }
+
 
 const VectorSchema = z.array(z.number()).length(EMBEDDING_DIM);
 
@@ -291,7 +296,10 @@ function extractiveAnswer(question: string, sources: MatchRow[]): string {
 export const askPortfolio = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => AskSchema.parse(data))
   .handler(async ({ data }) => {
-    const key = process.env.LOVABLE_API_KEY;
+    // Eigener OpenAI-Key hat Vorrang; sonst Fallback auf das Lovable AI Gateway.
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const key = openaiKey ?? process.env.LOVABLE_API_KEY;
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
 
@@ -361,14 +369,16 @@ export const askPortfolio = createServerFn({ method: "POST" })
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
 
     try {
-      const chatRes = await fetch(`${GATEWAY_URL}/chat/completions`, {
+      const baseUrl = openaiKey ? OPENAI_URL : GATEWAY_URL;
+      const model = openaiKey ? OPENAI_MODEL : CHAT_MODEL;
+      const chatRes = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify({
-          model: CHAT_MODEL,
+          model,
           messages: [
             { role: "system", content: systemPrompt },
             {
@@ -379,6 +389,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
         }),
       });
       if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
+
       const chatJson = await chatRes.json();
       const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
       if (!answer.trim()) throw new Error("Leere LLM-Antwort");
