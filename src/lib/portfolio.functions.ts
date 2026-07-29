@@ -37,13 +37,9 @@ function gatewayError(status: number, body: string): Error {
 
 const VectorSchema = z.array(z.number()).length(EMBEDDING_DIM);
 
-/** Split an essay into paragraphs. Empty lines are the boundary. */
-function chunkText(content: string): string[] {
-  return content
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-}
+/** Chunking-Logik ist für Client und Server dieselbe (src/lib/chunking.ts). */
+import { chunkText } from "./chunking";
+
 
 const IngestSchema = z.object({
   title: z.string().min(1),
