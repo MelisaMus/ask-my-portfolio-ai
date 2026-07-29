@@ -106,7 +106,7 @@ export const ingestEssay = createServerFn({ method: "POST" })
 const AskSchema = z.object({ question: z.string().min(2) });
 
 /** Default cosine-similarity cutoff for retrieval (0 = alles, 1 = identisch). */
-export const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
+const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
 
 const SearchSchema = z.object({
   question: z.string().min(2),
