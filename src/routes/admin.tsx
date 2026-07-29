@@ -238,12 +238,14 @@ function Admin() {
     <main className="mx-auto min-h-screen max-w-2xl px-6 py-16">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          Admin – Essays einpflegen
+          Admin – Essays verwalten
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Titel, optionale Quelle und Volltext eintragen. Absätze werden per Leerzeile getrennt,
-          jeder Absatz wird eingebettet und in den RAG-Index geschrieben.
+          {editingId
+            ? "Essay bearbeiten: Beim Speichern werden alle Absätze neu gechunkt und die Embeddings komplett neu berechnet."
+            : "Titel, optionale Quelle und Volltext eintragen. Absätze werden per Leerzeile getrennt, jeder Absatz wird eingebettet und in den RAG-Index geschrieben."}
         </p>
+
         <Link to="/" className="mt-3 inline-block text-sm text-primary underline underline-offset-4">
           ← Zurück zum Chat
         </Link>
