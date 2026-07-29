@@ -238,8 +238,25 @@ export const askPortfolio = createServerFn({ method: "POST" })
     if (sources.length === 0) {
       return {
         answer: "In den vorhandenen Texten habe ich dazu nichts gefunden.",
+        fallback: false,
         sources: [],
       };
+    }
+
+    const sourceList = sources.map((s, i) => ({
+      ref: i + 1,
+      essay_id: s.essay_id,
+      title: s.title,
+      source: s.source,
+      // Absatz-Referenz (0-basiert im Index -> 1-basiert für die Anzeige)
+      chunk_index: s.chunk_index,
+      excerpt: s.content.length > 240 ? s.content.slice(0, 240) + "…" : s.content,
+      similarity: s.similarity,
+    }));
+
+    // Ohne API-Key gar nicht erst das Gateway aufrufen -> direkt extraktiv antworten.
+    if (!key) {
+      return { answer: extractiveAnswer(data.question, sources), fallback: true, sources: sourceList };
     }
 
     // 3. Build a grounded prompt and ask the LLM to cite by [n]
@@ -252,38 +269,33 @@ export const askPortfolio = createServerFn({ method: "POST" })
       "Antworte auf Deutsch, präzise und in 2-5 Sätzen. Zitiere die verwendeten Quellen mit [1], [2] etc. " +
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
 
-    const chatRes = await fetch(`${GATEWAY_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: CHAT_MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: `Frage: ${data.question}\n\nTextausschnitte:\n\n${context}`,
-          },
-        ],
-      }),
-    });
-    if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
-    const chatJson = await chatRes.json();
-    const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
-
-    return {
-      answer,
-      sources: sources.map((s, i) => ({
-        ref: i + 1,
-        essay_id: s.essay_id,
-        title: s.title,
-        source: s.source,
-        // Absatz-Referenz (0-basiert im Index -> 1-basiert für die Anzeige)
-        chunk_index: s.chunk_index,
-        excerpt: s.content.length > 240 ? s.content.slice(0, 240) + "…" : s.content,
-        similarity: s.similarity,
-      })),
-    };
+    try {
+      const chatRes = await fetch(`${GATEWAY_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model: CHAT_MODEL,
+          messages: [
+            { role: "system", content: systemPrompt },
+            {
+              role: "user",
+              content: `Frage: ${data.question}\n\nTextausschnitte:\n\n${context}`,
+            },
+          ],
+        }),
+      });
+      if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
+      const chatJson = await chatRes.json();
+      const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
+      if (!answer.trim()) throw new Error("Leere LLM-Antwort");
+      return { answer, fallback: false, sources: sourceList };
+    } catch {
+      // 4. Fallback: kein LLM verfügbar (Credit-/Rate-Limit) -> extraktive
+      // Zusammenfassung direkt aus den gefundenen Absätzen, inkl. Quellen.
+      return { answer: extractiveAnswer(data.question, sources), fallback: true, sources: sourceList };
+    }
   });
+
