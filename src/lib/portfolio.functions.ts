@@ -105,6 +105,81 @@ export const ingestEssay = createServerFn({ method: "POST" })
     return { essay_id: essay.id, chunk_count: rows.length };
   });
 
+const UpdateSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(1),
+  content: z.string().min(20),
+  source: z.string().optional().nullable(),
+  /** Neu berechnete Vektoren – ein Vektor pro Absatz des NEUEN Textes. */
+  embeddings: z.array(VectorSchema).min(1),
+});
+
+/**
+ * Essay bearbeiten. Der RAG-Index wird dabei immer neu aufgebaut:
+ * alte Chunks werden gelöscht und durch die neuen Absätze + Embeddings ersetzt.
+ */
+export const updateEssay = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => UpdateSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const title = data.title.trim();
+    const content = data.content.trim();
+
+    // Duplikat-Check gegen ANDERE Essays (das eigene darf gleich bleiben).
+    const [byTitle, byContent] = await Promise.all([
+      supabaseAdmin.from("essays").select("id, title").ilike("title", title).neq("id", data.id).limit(1),
+      supabaseAdmin.from("essays").select("id, title").eq("content", content).neq("id", data.id).limit(1),
+    ]);
+    if (byTitle.error) throw new Error(byTitle.error.message);
+    if (byContent.error) throw new Error(byContent.error.message);
+    const dup = byTitle.data?.[0] ?? byContent.data?.[0];
+    if (dup) throw new Error(`Ein anderes Essay mit gleichem Titel/Text existiert bereits ("${dup.title}").`);
+
+    const chunks = chunkText(content);
+    if (chunks.length === 0) throw new Error("Kein Absatz erkannt.");
+    if (chunks.length !== data.embeddings.length) {
+      throw new Error(
+        `Anzahl Absätze (${chunks.length}) und Embeddings (${data.embeddings.length}) stimmen nicht überein.`,
+      );
+    }
+
+    const { error: updErr } = await supabaseAdmin
+      .from("essays")
+      .update({ title, content, source: data.source ?? null })
+      .eq("id", data.id);
+    if (updErr) throw new Error(updErr.message);
+
+    // Index neu aufbauen: alte Chunks weg, neue rein.
+    const { error: delErr } = await supabaseAdmin.from("essay_chunks").delete().eq("essay_id", data.id);
+    if (delErr) throw new Error(delErr.message);
+
+    const rows = chunks.map((text, i) => ({
+      essay_id: data.id,
+      chunk_index: i,
+      content: text,
+      embedding: JSON.stringify(data.embeddings[i]) as unknown as string,
+    }));
+    const { error: chunkErr } = await supabaseAdmin.from("essay_chunks").insert(rows);
+    if (chunkErr) throw new Error(chunkErr.message);
+
+    return { essay_id: data.id, chunk_count: rows.length };
+  });
+
+/** Essay samt allen Chunks aus dem RAG-Index löschen. */
+export const deleteEssay = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // Chunks zuerst (kein ON DELETE CASCADE vorausgesetzt).
+    const { error: chunkErr } = await supabaseAdmin.from("essay_chunks").delete().eq("essay_id", data.id);
+    if (chunkErr) throw new Error(chunkErr.message);
+    const { error } = await supabaseAdmin.from("essays").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+
 const AskSchema = z.object({
   question: z.string().min(2),
   embedding: VectorSchema,
