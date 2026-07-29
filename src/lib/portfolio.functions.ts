@@ -56,7 +56,11 @@ const IngestSchema = z.object({
 export const ingestEssay = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => IngestSchema.parse(data))
   .handler(async ({ data }) => {
+    // Schreibzugriff nur mit freigeschalteter Admin-Session.
+    const { requireAdmin } = await import("./admin-gate.server");
+    await requireAdmin();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
 
     const title = data.title.trim();
     const content = data.content.trim();
@@ -126,7 +130,10 @@ const UpdateSchema = z.object({
 export const updateEssay = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => UpdateSchema.parse(data))
   .handler(async ({ data }) => {
+    const { requireAdmin } = await import("./admin-gate.server");
+    await requireAdmin();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
 
     const title = data.title.trim();
     const content = data.content.trim();
@@ -175,7 +182,10 @@ export const updateEssay = createServerFn({ method: "POST" })
 export const deleteEssay = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data }) => {
+    const { requireAdmin } = await import("./admin-gate.server");
+    await requireAdmin();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
     // Chunks zuerst (kein ON DELETE CASCADE vorausgesetzt).
     const { error: chunkErr } = await supabaseAdmin.from("essay_chunks").delete().eq("essay_id", data.id);
     if (chunkErr) throw new Error(chunkErr.message);
