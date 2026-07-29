@@ -79,6 +79,7 @@ function Index() {
   const [retrieved, setRetrieved] = useState(0);
   // Vorschau der Absätze, die im normalen Modus als Kontext ans LLM gehen.
   const [contextPreview, setContextPreview] = useState<Match[]>([]);
+  const [showContext, setShowContext] = useState(true);
   const [expandedChunkId, setExpandedChunkId] = useState<string | null>(null);
   // Im Test-Modus geklickter Treffer -> Detail-Sidepanel
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
