@@ -16,6 +16,8 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+/** Chunking-Logik ist für Client und Server dieselbe (src/lib/chunking.ts). */
+import { chunkText } from "./chunking";
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1";
 const CHAT_MODEL = "google/gemini-3.6-flash";
@@ -37,8 +39,8 @@ function gatewayError(status: number, body: string): Error {
 
 const VectorSchema = z.array(z.number()).length(EMBEDDING_DIM);
 
-/** Chunking-Logik ist für Client und Server dieselbe (src/lib/chunking.ts). */
-import { chunkText } from "./chunking";
+
+
 
 
 const IngestSchema = z.object({
