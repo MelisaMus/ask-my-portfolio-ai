@@ -301,9 +301,10 @@ function Index() {
                 {m.content.length > EXCERPT_LIMIT && (
                   <button
                     type="button"
-                    onClick={() =>
-                      setExpandedChunkId(expandedChunkId === m.chunk_id ? null : m.chunk_id)
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedChunkId(expandedChunkId === m.chunk_id ? null : m.chunk_id);
+                    }}
                     className="mt-1 text-xs text-primary underline underline-offset-4 hover:opacity-80"
                   >
                     {expandedChunkId === m.chunk_id
