@@ -391,9 +391,15 @@ function Index() {
       {answer && (
         <section className="mt-8">
           <div className="rounded-md border border-border bg-card p-4">
-            <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Antwort
+              {isFallback && (
+                <span className="rounded border border-border px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-muted-foreground">
+                  Ohne LLM · Auszüge aus den Texten
+                </span>
+              )}
             </h2>
+
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{answer}</p>
 
             {/* Quellenangabe direkt unter der Antwort: Titel + Absatz-Referenz + Zitat */}
