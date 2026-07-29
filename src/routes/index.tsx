@@ -79,12 +79,8 @@ function Index() {
   const [essayCache, setEssayCache] = useState<Record<string, string>>({});
   const [loadingEssayId, setLoadingEssayId] = useState<string | null>(null);
 
-  // Ingest state
-  const [title, setTitle] = useState("");
-  const [source, setSource] = useState("");
-  const [content, setContent] = useState("");
-  const [ingesting, setIngesting] = useState(false);
-  const [ingestMsg, setIngestMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+
 
   async function onAsk(e: React.FormEvent) {
     e.preventDefault();
