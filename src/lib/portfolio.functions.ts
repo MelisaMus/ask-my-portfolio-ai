@@ -258,6 +258,15 @@ const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
 const MIN_CONTEXT_CHUNKS = 3;
 /** Obergrenze der Kontext-Chunks (Top-k aus der Vektorsuche). */
 const MATCH_COUNT = 5;
+/**
+ * Wie viele Chunks die Vektorsuche liefert, BEVOR wir auf MATCH_COUNT kürzen.
+ * Mehr Kandidaten sind nötig, damit die Diversitäts-Regel (unten) überhaupt
+ * Alternativen aus anderen Essays zur Auswahl hat.
+ */
+const CANDIDATE_COUNT = MATCH_COUNT * 4;
+/** Max. Chunks aus demselben Essay – verhindert, dass ein Text alles belegt. */
+const MAX_PER_ESSAY = 2;
+
 
 const AskSchema = z.object({
   question: z.string().min(2),
