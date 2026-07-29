@@ -69,7 +69,17 @@ export const ingestEssay = createServerFn({ method: "POST" })
       );
     }
 
-    // 1. Store the essay itself
+    // 1. Chunk + embed FIRST, before touching the DB. If any embedding fails
+    //    (rate limit, credit exhaustion, provider 5xx), we abort *before*
+    //    inserting the essay row — no orphan rows without chunks remain.
+    const chunks = chunkText(content);
+    if (chunks.length === 0) throw new Error("Kein Absatz erkannt.");
+    const vectors: number[][] = [];
+    for (const c of chunks) {
+      vectors.push(await embed(c));
+    }
+
+    // 2. Insert essay + chunks only after every embedding succeeded.
     const { data: essay, error: essayErr } = await supabaseAdmin
       .from("essays")
       .insert({ title, content, source: data.source ?? null })
@@ -77,20 +87,18 @@ export const ingestEssay = createServerFn({ method: "POST" })
       .single();
     if (essayErr || !essay) throw new Error(essayErr?.message ?? "Insert failed");
 
-    // 2. Chunk + embed each paragraph, then persist with a foreign-key link
-    const chunks = chunkText(content);
-    const rows = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const vector = await embed(chunks[i]);
-      rows.push({
-        essay_id: essay.id,
-        chunk_index: i,
-        content: chunks[i],
-        embedding: vector as unknown as string,
-      });
-    }
+    const rows = chunks.map((text, i) => ({
+      essay_id: essay.id,
+      chunk_index: i,
+      content: text,
+      embedding: vectors[i] as unknown as string,
+    }));
     const { error: chunkErr } = await supabaseAdmin.from("essay_chunks").insert(rows);
-    if (chunkErr) throw new Error(chunkErr.message);
+    if (chunkErr) {
+      // Roll back the essay row so a chunk-insert failure doesn't leave an orphan.
+      await supabaseAdmin.from("essays").delete().eq("id", essay.id);
+      throw new Error(chunkErr.message);
+    }
 
     return { essay_id: essay.id, chunk_count: rows.length };
   });
