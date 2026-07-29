@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { askPortfolio, ingestEssay, searchPortfolio } from "@/lib/portfolio.functions";
+import { askPortfolio, searchPortfolio } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/")({
@@ -58,7 +58,6 @@ function excerptOf(text: string) {
 function Index() {
   const ask = useServerFn(askPortfolio);
   const search = useServerFn(searchPortfolio);
-  const ingest = useServerFn(ingestEssay);
 
   // Ask state
   const [question, setQuestion] = useState("");
@@ -169,44 +168,6 @@ function Index() {
         setEssayCache((c) => ({ ...c, [essayId]: data.content }));
       }
       setLoadingEssayId(null);
-    }
-  }
-
-  async function onIngest(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    // Read values directly from the form so programmatic fills work even when
-    // React state updates are not triggered by automated input events.
-    const form = e.currentTarget;
-    const formData = new FormData(form);
-    const ingestTitle = String(formData.get("title") || "").trim();
-    const ingestSource = String(formData.get("source") || "").trim();
-    const ingestContent = String(formData.get("content") || "").trim();
-    if (!ingestTitle || !ingestContent) return;
-    setIngesting(true);
-    setIngestMsg(null);
-    try {
-      const res = await ingest({
-        data: {
-          title: ingestTitle,
-          content: ingestContent,
-          source: ingestSource || null,
-        },
-      });
-      setIngestMsg({
-        kind: "ok",
-        text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.`,
-      });
-      form.reset();
-      setTitle("");
-      setSource("");
-      setContent("");
-    } catch (err) {
-      setIngestMsg({
-        kind: "err",
-        text: err instanceof Error ? err.message : "Fehler beim Einfügen",
-      });
-    } finally {
-      setIngesting(false);
     }
   }
 
@@ -440,62 +401,12 @@ function Index() {
 
       <hr className="my-12 border-border" />
 
-      <section>
-        <h2 className="text-lg font-semibold text-foreground">Essay hinzufügen</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Titel, optionale Quelle und Volltext eintragen. Absätze werden per Leerzeile getrennt,
-          jeder Absatz wird eingebettet und in den RAG-Index geschrieben.
-        </p>
-
-        <form onSubmit={onIngest} className="mt-4 space-y-3">
-          <input
-            name="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Titel"
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-          <input
-            name="source"
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-            placeholder="Quelle (z. B. InZeitung 2024)"
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-          <textarea
-            name="content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Volltext (Absätze durch Leerzeilen trennen)"
-            rows={12}
-            className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-          {content.trim() && (
-            <p className="text-xs text-muted-foreground">
-              Vorschau: {content.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).length}{" "}
-              Absätze werden als Chunks eingebettet.
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={ingesting || !title.trim() || !content.trim()}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
-          </button>
-          {ingestMsg && (
-            <p
-              className={
-                ingestMsg.kind === "ok"
-                  ? "rounded-md border border-primary/30 bg-primary/10 p-3 text-sm text-foreground"
-                  : "rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-              }
-            >
-              {ingestMsg.text}
-            </p>
-          )}
-        </form>
-      </section>
+      <p className="text-sm text-muted-foreground">
+        Essays einpflegen?{" "}
+        <Link to="/admin" className="text-primary underline underline-offset-4">
+          Zur Admin-Ansicht
+        </Link>
+      </p>
 
     </main>
   );
