@@ -54,6 +54,7 @@ type Match = {
   content: string;
   similarity: number;
   // Debug-Metadaten aus searchPortfolio
+  above_threshold: boolean;
   chunk_total: number;
   char_count: number;
   word_count: number;
@@ -82,6 +83,10 @@ function Index() {
   // Konfigurierbarer Similarity-Threshold: Treffer darunter werden verworfen.
   const [threshold, setThreshold] = useState(0.3);
   const [retrieved, setRetrieved] = useState(0);
+  // Wie viele Treffer lagen tatsächlich über dem Threshold …
+  const [aboveCount, setAboveCount] = useState(0);
+  // … und wurden schwächere Chunks ergänzt, um das Kontext-Minimum zu erreichen?
+  const [filled, setFilled] = useState(false);
   // Vorschau der Absätze, die im normalen Modus als Kontext ans LLM gehen.
   const [contextPreview, setContextPreview] = useState<Match[]>([]);
   const [showContext, setShowContext] = useState(true);
