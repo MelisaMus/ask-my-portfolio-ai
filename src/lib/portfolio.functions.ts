@@ -344,19 +344,18 @@ export const askPortfolio = createServerFn({ method: "POST" })
 
 
     // 1. Frage-Embedding kommt fertig aus dem Browser (lokales MiniLM).
-    // 2. Retrieve top-5 most similar chunks via pgvector cosine similarity
+    // 2. Retrieve top-k most similar chunks via pgvector cosine similarity
+    const threshold = data.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
       query_embedding: JSON.stringify(data.embedding) as unknown as string,
-      match_count: 5,
+      match_count: MATCH_COUNT,
     });
     if (error) throw new Error(error.message);
 
     const allMatches = (matches ?? []) as MatchRow[];
 
-    // Keep the 3-5 best chunks: everything above the similarity threshold,
-    // but always at least the top 3 so the LLM never runs without context.
-    const relevant = allMatches.filter((m) => m.similarity >= DEFAULT_SIMILARITY_THRESHOLD);
-    const sources = (relevant.length >= 3 ? relevant : allMatches.slice(0, 3)).slice(0, 5);
+    // Exakt dieselbe Auswahlregel wie im Test-Modus (selectContext).
+    const { selected: sources } = selectContext(allMatches, threshold);
 
     if (sources.length === 0) {
       return {
@@ -368,17 +367,8 @@ export const askPortfolio = createServerFn({ method: "POST" })
 
     // Gesamtzahl der Absätze pro Essay ermitteln, damit die UI
     // "Absatz 3/12" anstatt nur "Absatz 3" anzeigen kann.
-    const essayIds = [...new Set(sources.map((s) => s.essay_id))];
-    const totals: Record<string, number> = {};
-    await Promise.all(
-      essayIds.map(async (id) => {
-        const { count } = await supabaseAdmin
-          .from("essay_chunks")
-          .select("id", { count: "exact", head: true })
-          .eq("essay_id", id);
-        totals[id] = count ?? 0;
-      }),
-    );
+    const totals = await chunkTotals(supabaseAdmin, [...new Set(sources.map((s) => s.essay_id))]);
+
 
     const sourceList = sources.map((s, i) => ({
       ref: i + 1,
