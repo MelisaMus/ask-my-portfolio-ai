@@ -366,13 +366,38 @@ function Admin() {
         ) : (
           <ul className="space-y-2">
             {essays.map((e) => (
-              <li key={e.id} className="rounded-md border border-border bg-background p-3 text-sm">
-                <p className="font-medium text-foreground">{e.title}</p>
-                <p className="text-xs text-muted-foreground">
-                  {e.source ?? "ohne Quelle"} · {new Date(e.created_at).toLocaleDateString("de-DE")}
-                </p>
+              <li
+                key={e.id}
+                className="flex items-start justify-between gap-3 rounded-md border border-border bg-background p-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground">{e.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {e.source ?? "ohne Quelle"} · {new Date(e.created_at).toLocaleDateString("de-DE")}
+                    {editingId === e.id && " · wird gerade bearbeitet"}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void startEdit(e.id)}
+                    disabled={busyId !== null || ingesting}
+                    className="rounded-md border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    Bearbeiten
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onDelete(e)}
+                    disabled={busyId !== null || ingesting}
+                    className="rounded-md border border-destructive/40 px-3 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                  >
+                    {busyId === e.id ? "…" : "Löschen"}
+                  </button>
+                </div>
               </li>
             ))}
+
           </ul>
         )}
       </section>
