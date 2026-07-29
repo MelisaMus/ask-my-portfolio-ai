@@ -279,7 +279,8 @@ function Index() {
         <section className="mt-8">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Retrieval-Ergebnisse · {matches.length}/{retrieved} über Threshold {threshold.toFixed(2)}
+              Kontext-Auswahl · {aboveCount}/{retrieved} über Threshold {threshold.toFixed(2)}
+              {filled && <span className="ml-1 normal-case">· mit schwächeren Chunks aufgefüllt</span>}
             </h2>
             <button
               type="button"
