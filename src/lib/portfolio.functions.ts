@@ -576,14 +576,17 @@ export const askPortfolio = createServerFn({ method: "POST" })
       const chatJson = (await chatRes.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };
-      const answer = chatJson.choices?.[0]?.message?.content ?? "";
-      if (!answer.trim())
+      const raw = chatJson.choices?.[0]?.message?.content ?? "";
+      if (!raw.trim())
         throw new LlmError("empty_response", "Die KI hat keine verwertbare Antwort geliefert.", 200);
+      // Inline-Zitate gegen die echten Metadaten prüfen und ggf. korrigieren.
+      const answer = fixCitations(raw, sources);
 
       console.info(
         `[askPortfolio] ok provider=${provider} model=${model} ms=${Date.now() - startedAt} chunks=${sources.length}`,
       );
       return { answer, fallback: false, sources: sourceList };
+
     } catch (err) {
       // 4. Fallback: extraktive Antwort aus den gefundenen Absätzen.
       // Jeder Fehler wird klassifiziert geloggt – Kontingentgrenzen als warn,
