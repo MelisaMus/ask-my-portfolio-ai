@@ -69,7 +69,7 @@ function Index() {
   const [source, setSource] = useState("");
   const [content, setContent] = useState("");
   const [ingesting, setIngesting] = useState(false);
-  const [ingestMsg, setIngestMsg] = useState<string | null>(null);
+  const [ingestMsg, setIngestMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   async function onAsk(e: React.FormEvent) {
     e.preventDefault();
@@ -125,12 +125,18 @@ function Index() {
     setIngestMsg(null);
     try {
       const res = await ingest({ data: { title, content, source: source || null } });
-      setIngestMsg(`Essay gespeichert, ${res.chunk_count} Absätze eingebettet.`);
+      setIngestMsg({
+        kind: "ok",
+        text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.`,
+      });
       setTitle("");
       setSource("");
       setContent("");
     } catch (err) {
-      setIngestMsg(err instanceof Error ? err.message : "Fehler beim Einfügen");
+      setIngestMsg({
+        kind: "err",
+        text: err instanceof Error ? err.message : "Fehler beim Einfügen",
+      });
     } finally {
       setIngesting(false);
     }
@@ -317,7 +323,17 @@ function Index() {
           >
             {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
           </button>
-          {ingestMsg && <p className="text-xs text-muted-foreground">{ingestMsg}</p>}
+          {ingestMsg && (
+            <p
+              className={
+                ingestMsg.kind === "ok"
+                  ? "rounded-md border border-primary/30 bg-primary/10 p-3 text-sm text-foreground"
+                  : "rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+              }
+            >
+              {ingestMsg.text}
+            </p>
+          )}
         </form>
       </section>
 
