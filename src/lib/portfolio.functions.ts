@@ -255,6 +255,8 @@ export const askPortfolio = createServerFn({ method: "POST" })
         essay_id: s.essay_id,
         title: s.title,
         source: s.source,
+        // Absatz-Referenz (0-basiert im Index -> 1-basiert für die Anzeige)
+        chunk_index: s.chunk_index,
         excerpt: s.content.length > 240 ? s.content.slice(0, 240) + "…" : s.content,
         similarity: s.similarity,
       })),
