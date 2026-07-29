@@ -187,22 +187,62 @@ function Admin() {
         )}
         <button
           type="submit"
-          disabled={ingesting || !title.trim() || !content.trim()}
+          disabled={
+            ingesting || status.kind === "waiting" || !title.trim() || !content.trim()
+          }
           className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
         </button>
-        {msg && (
-          <p
-            className={
-              msg.kind === "ok"
-                ? "rounded-md border border-primary/30 bg-primary/10 p-3 text-sm text-foreground"
-                : "rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-            }
-          >
-            {msg.text}
+
+        {/* Ingest-Statusanzeige: laufend / Auto-Retry bei Credit-Limit / Erfolg / Fehler */}
+        {status.kind === "running" && (
+          <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Ingest läuft… (Versuch {status.attempt}) – Absätze werden eingebettet.
           </p>
         )}
+        {status.kind === "waiting" && (
+          <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+            <p className="font-medium text-destructive">
+              Ingest pausiert: Workspace-Credit-Limit erreicht (HTTP 403)
+            </p>
+            <p className="text-muted-foreground">
+              Das AI-Gateway blockiert die Embeddings, solange das Workspace-Credit-Limit erreicht
+              ist. Bitte unter <span className="font-medium">Settings → Plans &amp; credits</span> das
+              Limit anheben – der Ingest startet danach automatisch neu.
+            </p>
+            <p className="text-muted-foreground">
+              Nächster automatischer Versuch (Nr. {status.attempt}) in {status.secondsLeft}s.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => void runIngest(status.attempt)}
+                className="rounded-md border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                Jetzt erneut versuchen
+              </button>
+              <button
+                type="button"
+                onClick={cancelRetry}
+                className="rounded-md border border-border px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-muted"
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        )}
+        {status.kind === "ok" && (
+          <p className="rounded-md border border-primary/30 bg-primary/10 p-3 text-sm text-foreground">
+            {status.text}
+          </p>
+        )}
+        {status.kind === "err" && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            {status.text}
+          </p>
+        )}
+
       </form>
 
       <section className="mt-12">
