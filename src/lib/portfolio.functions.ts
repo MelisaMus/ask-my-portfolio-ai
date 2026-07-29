@@ -520,11 +520,13 @@ export const askPortfolio = createServerFn({ method: "POST" })
           model,
           messages: [
             { role: "system", content: systemPrompt },
+            ...historyMessages,
             {
               role: "user",
               content: `Frage: ${data.question}\n\nTextausschnitte:\n\n${context}`,
             },
           ],
+
         }),
         // Ohne Timeout hängt eine tote Verbindung bis zum Worker-Limit.
         signal: AbortSignal.timeout(30_000),
