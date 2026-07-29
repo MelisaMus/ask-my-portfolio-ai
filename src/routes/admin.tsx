@@ -27,15 +27,36 @@ export const Route = createFileRoute("/admin")({
 
 type EssayRow = { id: string; title: string; source: string | null; created_at: string };
 
+/** Erkennt den Gateway-403 „Workspace credit limit reached“ anhand der Fehlermeldung. */
+function isCreditLimit(message: string) {
+  return /credit limit|Guthaben\/Limit|403/i.test(message);
+}
+
+/** Wartezeit vor dem nächsten Auto-Retry: 30s, 60s, 120s, 240s, max. 300s. */
+function retryDelay(attempt: number) {
+  return Math.min(30 * 2 ** (attempt - 1), 300);
+}
+
+type Status =
+  | { kind: "idle" }
+  | { kind: "running"; attempt: number }
+  | { kind: "waiting"; attempt: number; secondsLeft: number; reason: string }
+  | { kind: "ok"; text: string }
+  | { kind: "err"; text: string };
+
 function Admin() {
   const ingest = useServerFn(ingestEssay);
 
   const [title, setTitle] = useState("");
   const [source, setSource] = useState("");
   const [content, setContent] = useState("");
-  const [ingesting, setIngesting] = useState(false);
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [essays, setEssays] = useState<EssayRow[]>([]);
+  // Zwischenspeicher, damit der Auto-Retry dieselben Daten erneut senden kann.
+  const pending = useRef<{ title: string; source: string | null; content: string } | null>(null);
+  const cancelled = useRef(false);
+
+  const ingesting = status.kind === "running";
 
   // Bereits indexierte Essays anzeigen (reiner Lesezugriff über RLS).
   async function loadEssays() {
@@ -55,33 +76,71 @@ function Admin() {
     .map((p) => p.trim())
     .filter(Boolean).length;
 
-  async function onIngest(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    // Werte direkt aus dem Formular lesen, damit auch programmatische
-    // Eingaben ohne React-State-Update funktionieren.
-    const form = e.currentTarget;
-    const fd = new FormData(form);
-    const t = String(fd.get("title") || "").trim();
-    const s = String(fd.get("source") || "").trim();
-    const c = String(fd.get("content") || "").trim();
-    if (!t || !c) return;
-    setIngesting(true);
-    setMsg(null);
+  /** Führt einen Ingest-Versuch aus; bei Credit-Limit wird automatisch neu gestartet. */
+  async function runIngest(attempt: number) {
+    const payload = pending.current;
+    if (!payload) return;
+    setStatus({ kind: "running", attempt });
     try {
       // Ingest = Chunking (Absätze) -> Embedding je Chunk -> Insert in essay_chunks.
-      const res = await ingest({ data: { title: t, content: c, source: s || null } });
-      setMsg({ kind: "ok", text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.` });
-      form.reset();
+      const res = await ingest({ data: payload });
+      pending.current = null;
+      setStatus({ kind: "ok", text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.` });
       setTitle("");
       setSource("");
       setContent("");
       void loadEssays();
     } catch (err) {
-      setMsg({ kind: "err", text: err instanceof Error ? err.message : "Fehler beim Einfügen" });
-    } finally {
-      setIngesting(false);
+      const text = err instanceof Error ? err.message : "Fehler beim Einfügen";
+      if (isCreditLimit(text)) {
+        // Klarer Grund + automatischer Neustart nach Backoff.
+        scheduleRetry(attempt + 1, text);
+      } else {
+        pending.current = null;
+        setStatus({ kind: "err", text });
+      }
     }
   }
+
+  function scheduleRetry(nextAttempt: number, reason: string) {
+    cancelled.current = false;
+    let secondsLeft = retryDelay(nextAttempt - 1);
+    setStatus({ kind: "waiting", attempt: nextAttempt, secondsLeft, reason });
+    const timer = setInterval(() => {
+      if (cancelled.current) {
+        clearInterval(timer);
+        return;
+      }
+      secondsLeft -= 1;
+      if (secondsLeft <= 0) {
+        clearInterval(timer);
+        void runIngest(nextAttempt);
+      } else {
+        setStatus({ kind: "waiting", attempt: nextAttempt, secondsLeft, reason });
+      }
+    }, 1000);
+  }
+
+  function cancelRetry() {
+    cancelled.current = true;
+    pending.current = null;
+    setStatus({ kind: "err", text: "Auto-Retry abgebrochen." });
+  }
+
+  async function onIngest(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    // Werte direkt aus dem Formular lesen, damit auch programmatische
+    // Eingaben ohne React-State-Update funktionieren.
+    const fd = new FormData(e.currentTarget);
+    const t = String(fd.get("title") || "").trim();
+    const s = String(fd.get("source") || "").trim();
+    const c = String(fd.get("content") || "").trim();
+    if (!t || !c) return;
+    cancelled.current = false;
+    pending.current = { title: t, source: s || null, content: c };
+    await runIngest(1);
+  }
+
 
   return (
     <main className="mx-auto min-h-screen max-w-2xl px-6 py-16">
