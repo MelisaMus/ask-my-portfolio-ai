@@ -382,10 +382,11 @@ function extractiveAnswer(question: string, sources: MatchRow[], reason?: string
   });
 
   return (
-    "Hinweis: Die KI-Antwort ist derzeit nicht verfügbar (Credit-Limit). " +
+    `Hinweis: Die KI-Antwort ist derzeit nicht verfügbar${reason ? ` (${reason})` : ""}. ` +
     "Hier stattdessen die passendsten Stellen direkt aus den Texten:\n\n" +
     lines.join("\n\n")
   );
+
 }
 
 export const askPortfolio = createServerFn({ method: "POST" })
