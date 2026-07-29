@@ -35,15 +35,28 @@ type Source = {
   similarity: number;
 };
 
+type Match = {
+  chunk_id: string;
+  essay_id: string;
+  title: string;
+  source: string | null;
+  chunk_index: number;
+  content: string;
+  similarity: number;
+};
+
 function Index() {
   const ask = useServerFn(askPortfolio);
+  const search = useServerFn(searchPortfolio);
   const ingest = useServerFn(ingestEssay);
 
   // Ask state
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [testMode, setTestMode] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Expanded full-essay content, keyed by essay_id
@@ -65,11 +78,18 @@ function Index() {
     setError(null);
     setAnswer(null);
     setSources([]);
+    setMatches([]);
     setOpenEssayId(null);
     try {
-      const res = await ask({ data: { question } });
-      setAnswer(res.answer);
-      setSources(res.sources);
+      if (testMode) {
+        // Retrieval-only: skip the LLM, show raw top-5 chunks + similarity scores.
+        const res = await search({ data: { question } });
+        setMatches(res.matches);
+      } else {
+        const res = await ask({ data: { question } });
+        setAnswer(res.answer);
+        setSources(res.sources);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
     } finally {
