@@ -194,7 +194,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
 
-    const sources = (matches ?? []) as Array<{
+    const allMatches = (matches ?? []) as Array<{
       chunk_id: string;
       essay_id: string;
       title: string;
@@ -203,6 +203,12 @@ export const askPortfolio = createServerFn({ method: "POST" })
       content: string;
       similarity: number;
     }>;
+
+    // Keep the 3-5 best chunks: everything above the similarity threshold,
+    // but always at least the top 3 so the LLM never runs without context.
+    const relevant = allMatches.filter((m) => m.similarity >= DEFAULT_SIMILARITY_THRESHOLD);
+    const sources = (relevant.length >= 3 ? relevant : allMatches.slice(0, 3)).slice(0, 5);
+
 
     if (sources.length === 0) {
       return {
