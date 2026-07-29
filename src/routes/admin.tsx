@@ -279,15 +279,32 @@ function Admin() {
             Vorschau: {chunkCount} Absätze werden als Chunks eingebettet.
           </p>
         )}
-        <button
-          type="submit"
-          disabled={
-            ingesting || status.kind === "waiting" || !title.trim() || !content.trim()
-          }
-          className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-        >
-          {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={
+              ingesting || status.kind === "waiting" || !title.trim() || !content.trim()
+            }
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {ingesting
+              ? "Wird eingebettet…"
+              : editingId
+                ? "Änderungen speichern & neu einbetten"
+                : "Essay einbetten & speichern"}
+          </button>
+          {editingId && (
+            <button
+              type="button"
+              onClick={resetForm}
+              disabled={ingesting}
+              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+            >
+              Bearbeiten abbrechen
+            </button>
+          )}
+        </div>
+
 
         {/* Ingest-Statusanzeige: laufend / Auto-Retry bei Credit-Limit / Erfolg / Fehler */}
         {status.kind === "running" && (
