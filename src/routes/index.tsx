@@ -339,19 +339,23 @@ function Index() {
       )}
 
       {answer && (
-        <section className="mt-8 space-y-6">
+        <section className="mt-8">
           <div className="rounded-md border border-border bg-card p-4">
             <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Antwort
             </h2>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{answer}</p>
-          </div>
 
-          {sources.length > 0 && (
-            <div>
-              <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            {/* Quellenangabe direkt unter der Antwort: Titel + Absatz-Referenz + Zitat */}
+            <div className="mt-5 border-t border-border pt-4">
+              <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Quellen
-              </h2>
+              </h3>
+              {sources.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Keine Quellen — die Antwort stützt sich auf keinen indexierten Absatz.
+                </p>
+              ) : (
               <ol className="space-y-3">
                 {sources.map((s) => {
                   const isOpen = openEssayId === s.essay_id;
