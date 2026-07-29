@@ -56,7 +56,11 @@ const IngestSchema = z.object({
 export const ingestEssay = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => IngestSchema.parse(data))
   .handler(async ({ data }) => {
+    // Schreibzugriff nur mit freigeschalteter Admin-Session.
+    const { requireAdmin } = await import("./admin-gate.server");
+    await requireAdmin();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
 
     const title = data.title.trim();
     const content = data.content.trim();
