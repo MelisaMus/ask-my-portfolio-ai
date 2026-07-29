@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ingestEssay } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -27,15 +27,36 @@ export const Route = createFileRoute("/admin")({
 
 type EssayRow = { id: string; title: string; source: string | null; created_at: string };
 
+/** Erkennt den Gateway-403 „Workspace credit limit reached“ anhand der Fehlermeldung. */
+function isCreditLimit(message: string) {
+  return /credit limit|Guthaben\/Limit|403/i.test(message);
+}
+
+/** Wartezeit vor dem nächsten Auto-Retry: 30s, 60s, 120s, 240s, max. 300s. */
+function retryDelay(attempt: number) {
+  return Math.min(30 * 2 ** (attempt - 1), 300);
+}
+
+type Status =
+  | { kind: "idle" }
+  | { kind: "running"; attempt: number }
+  | { kind: "waiting"; attempt: number; secondsLeft: number; reason: string }
+  | { kind: "ok"; text: string }
+  | { kind: "err"; text: string };
+
 function Admin() {
   const ingest = useServerFn(ingestEssay);
 
   const [title, setTitle] = useState("");
   const [source, setSource] = useState("");
   const [content, setContent] = useState("");
-  const [ingesting, setIngesting] = useState(false);
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [essays, setEssays] = useState<EssayRow[]>([]);
+  // Zwischenspeicher, damit der Auto-Retry dieselben Daten erneut senden kann.
+  const pending = useRef<{ title: string; source: string | null; content: string } | null>(null);
+  const cancelled = useRef(false);
+
+  const ingesting = status.kind === "running";
 
   // Bereits indexierte Essays anzeigen (reiner Lesezugriff über RLS).
   async function loadEssays() {
@@ -55,33 +76,72 @@ function Admin() {
     .map((p) => p.trim())
     .filter(Boolean).length;
 
-  async function onIngest(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    // Werte direkt aus dem Formular lesen, damit auch programmatische
-    // Eingaben ohne React-State-Update funktionieren.
-    const form = e.currentTarget;
-    const fd = new FormData(form);
-    const t = String(fd.get("title") || "").trim();
-    const s = String(fd.get("source") || "").trim();
-    const c = String(fd.get("content") || "").trim();
-    if (!t || !c) return;
-    setIngesting(true);
-    setMsg(null);
+  /** Führt einen Ingest-Versuch aus; bei Credit-Limit wird automatisch neu gestartet. */
+  async function runIngest(attempt: number) {
+    const payload = pending.current;
+    if (!payload) return;
+    cancelled.current = true; // laufenden Countdown stoppen
+    setStatus({ kind: "running", attempt });
     try {
       // Ingest = Chunking (Absätze) -> Embedding je Chunk -> Insert in essay_chunks.
-      const res = await ingest({ data: { title: t, content: c, source: s || null } });
-      setMsg({ kind: "ok", text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.` });
-      form.reset();
+      const res = await ingest({ data: payload });
+      pending.current = null;
+      setStatus({ kind: "ok", text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.` });
       setTitle("");
       setSource("");
       setContent("");
       void loadEssays();
     } catch (err) {
-      setMsg({ kind: "err", text: err instanceof Error ? err.message : "Fehler beim Einfügen" });
-    } finally {
-      setIngesting(false);
+      const text = err instanceof Error ? err.message : "Fehler beim Einfügen";
+      if (isCreditLimit(text)) {
+        // Klarer Grund + automatischer Neustart nach Backoff.
+        scheduleRetry(attempt + 1, text);
+      } else {
+        pending.current = null;
+        setStatus({ kind: "err", text });
+      }
     }
   }
+
+  function scheduleRetry(nextAttempt: number, reason: string) {
+    cancelled.current = false;
+    let secondsLeft = retryDelay(nextAttempt - 1);
+    setStatus({ kind: "waiting", attempt: nextAttempt, secondsLeft, reason });
+    const timer = setInterval(() => {
+      if (cancelled.current) {
+        clearInterval(timer);
+        return;
+      }
+      secondsLeft -= 1;
+      if (secondsLeft <= 0) {
+        clearInterval(timer);
+        void runIngest(nextAttempt);
+      } else {
+        setStatus({ kind: "waiting", attempt: nextAttempt, secondsLeft, reason });
+      }
+    }, 1000);
+  }
+
+  function cancelRetry() {
+    cancelled.current = true;
+    pending.current = null;
+    setStatus({ kind: "err", text: "Auto-Retry abgebrochen." });
+  }
+
+  async function onIngest(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    // Werte direkt aus dem Formular lesen, damit auch programmatische
+    // Eingaben ohne React-State-Update funktionieren.
+    const fd = new FormData(e.currentTarget);
+    const t = String(fd.get("title") || "").trim();
+    const s = String(fd.get("source") || "").trim();
+    const c = String(fd.get("content") || "").trim();
+    if (!t || !c) return;
+    cancelled.current = false;
+    pending.current = { title: t, source: s || null, content: c };
+    await runIngest(1);
+  }
+
 
   return (
     <main className="mx-auto min-h-screen max-w-2xl px-6 py-16">
@@ -128,22 +188,62 @@ function Admin() {
         )}
         <button
           type="submit"
-          disabled={ingesting || !title.trim() || !content.trim()}
+          disabled={
+            ingesting || status.kind === "waiting" || !title.trim() || !content.trim()
+          }
           className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
         </button>
-        {msg && (
-          <p
-            className={
-              msg.kind === "ok"
-                ? "rounded-md border border-primary/30 bg-primary/10 p-3 text-sm text-foreground"
-                : "rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-            }
-          >
-            {msg.text}
+
+        {/* Ingest-Statusanzeige: laufend / Auto-Retry bei Credit-Limit / Erfolg / Fehler */}
+        {status.kind === "running" && (
+          <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Ingest läuft… (Versuch {status.attempt}) – Absätze werden eingebettet.
           </p>
         )}
+        {status.kind === "waiting" && (
+          <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+            <p className="font-medium text-destructive">
+              Ingest pausiert: Workspace-Credit-Limit erreicht (HTTP 403)
+            </p>
+            <p className="text-muted-foreground">
+              Das AI-Gateway blockiert die Embeddings, solange das Workspace-Credit-Limit erreicht
+              ist. Bitte unter <span className="font-medium">Settings → Plans &amp; credits</span> das
+              Limit anheben – der Ingest startet danach automatisch neu.
+            </p>
+            <p className="text-muted-foreground">
+              Nächster automatischer Versuch (Nr. {status.attempt}) in {status.secondsLeft}s.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => void runIngest(status.attempt)}
+                className="rounded-md border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                Jetzt erneut versuchen
+              </button>
+              <button
+                type="button"
+                onClick={cancelRetry}
+                className="rounded-md border border-border px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-muted"
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        )}
+        {status.kind === "ok" && (
+          <p className="rounded-md border border-primary/30 bg-primary/10 p-3 text-sm text-foreground">
+            {status.text}
+          </p>
+        )}
+        {status.kind === "err" && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            {status.text}
+          </p>
+        )}
+
       </form>
 
       <section className="mt-12">
