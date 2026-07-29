@@ -354,7 +354,7 @@ export const searchPortfolio = createServerFn({ method: "POST" })
  * Sätze der gefundenen Absätze zu einer kurzen Zusammenfassung montiert –
  * jeweils mit Quellen-Referenz [n].
  */
-function extractiveAnswer(question: string, sources: MatchRow[]): string {
+function extractiveAnswer(question: string, sources: MatchRow[], reason?: string): string {
   // Frage-Stichwörter (ohne Kurzwörter) für ein simples Keyword-Scoring der Sätze.
   const terms = question
     .toLowerCase()
