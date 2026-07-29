@@ -493,7 +493,16 @@ export const askPortfolio = createServerFn({ method: "POST" })
       "Du beantwortest Fragen ausschließlich auf Grundlage der bereitgestellten Textausschnitte aus einer Essay-Sammlung. " +
       "Antworte auf Deutsch, präzise und in 2-5 Sätzen. Zitiere die verwendeten Quellen mit [1], [2] etc. " +
       "Nutze dabei die mitgelieferte Absatz-Information, z. B. [1, Absatz 3], wenn du auf einen konkreten Absatz verweist. " +
+      "Der bisherige Gesprächsverlauf dient nur dazu, Follow-up-Fragen und Bezüge zu verstehen – " +
+      "inhaltliche Aussagen stützt du weiterhin ausschließlich auf die Textausschnitte. " +
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
+
+    // Bisherige Turns als echte Chat-Nachrichten -> Follow-ups verstehen Bezüge.
+    const historyMessages = (data.history ?? []).flatMap((t) => [
+      { role: "user" as const, content: t.question },
+      { role: "assistant" as const, content: t.answer },
+    ]);
+
 
     const provider = openaiKey ? "openai" : "lovable-gateway";
     const baseUrl = openaiKey ? OPENAI_URL : GATEWAY_URL;
