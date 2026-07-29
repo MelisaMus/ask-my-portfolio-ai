@@ -517,6 +517,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
     }
 
     // 3. Grounded Prompt: Jeder Ausschnitt trägt seine ECHTE Absatznummer,
+
     //    damit das LLM sie nicht erfinden muss ("[3, Absatz 1]" obwohl es
     //    Absatz 9 war). Die Nummern werden danach zusätzlich validiert.
     const context = sources
