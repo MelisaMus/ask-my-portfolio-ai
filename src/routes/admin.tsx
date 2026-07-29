@@ -48,16 +48,26 @@ type Status =
 
 function Admin() {
   const ingest = useServerFn(ingestEssay);
+  const update = useServerFn(updateEssay);
+  const remove = useServerFn(deleteEssay);
 
   const [title, setTitle] = useState("");
   const [source, setSource] = useState("");
   const [content, setContent] = useState("");
+  /** Wenn gesetzt: Formular bearbeitet ein bestehendes Essay statt neu anzulegen. */
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [essays, setEssays] = useState<EssayRow[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
   // Fortschritt des lokalen MiniLM-Modells (Download + Embedding je Absatz)
   const [progress, setProgress] = useState<string | null>(null);
   // Zwischenspeicher, damit der Auto-Retry dieselben Daten erneut senden kann.
-  const pending = useRef<{ title: string; source: string | null; content: string } | null>(null);
+  const pending = useRef<{
+    id: string | null;
+    title: string;
+    source: string | null;
+    content: string;
+  } | null>(null);
   const cancelled = useRef(false);
 
   const ingesting = status.kind === "running";
@@ -80,28 +90,99 @@ function Admin() {
     .map((p) => p.trim())
     .filter(Boolean).length;
 
-  /** Führt einen Ingest-Versuch aus; bei Credit-Limit wird automatisch neu gestartet. */
+  function resetForm() {
+    setEditingId(null);
+    setTitle("");
+    setSource("");
+    setContent("");
+    pending.current = null;
+  }
+
+  /** Essay in das Formular laden (Volltext wird nachgeladen). */
+  async function startEdit(id: string) {
+    setBusyId(id);
+    const { data, error } = await supabase
+      .from("essays")
+      .select("id, title, source, content")
+      .eq("id", id)
+      .maybeSingle();
+    setBusyId(null);
+    if (error || !data) {
+      setStatus({ kind: "err", text: error?.message ?? "Essay nicht gefunden." });
+      return;
+    }
+    setEditingId(data.id);
+    setTitle(data.title);
+    setSource(data.source ?? "");
+    setContent(data.content);
+    setStatus({ kind: "idle" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  /** Essay inkl. aller Chunks aus dem Index löschen. */
+  async function onDelete(row: EssayRow) {
+    if (!window.confirm(`„${row.title}" wirklich löschen? Alle Absätze werden aus dem Index entfernt.`)) {
+      return;
+    }
+    setBusyId(row.id);
+    try {
+      await remove({ data: { id: row.id } });
+      if (editingId === row.id) resetForm();
+      setStatus({ kind: "ok", text: `„${row.title}" wurde gelöscht.` });
+      await loadEssays();
+    } catch (err) {
+      setStatus({ kind: "err", text: err instanceof Error ? err.message : "Löschen fehlgeschlagen" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /**
+   * Führt einen Ingest-/Update-Versuch aus. In beiden Fällen werden die
+   * Embeddings lokal neu berechnet; beim Update wird der Index des Essays
+   * komplett neu aufgebaut. Bei Credit-Limit wird automatisch neu gestartet.
+   */
   async function runIngest(attempt: number) {
     const payload = pending.current;
     if (!payload) return;
     cancelled.current = true; // laufenden Countdown stoppen
     setStatus({ kind: "running", attempt });
     try {
-      // Ingest = Chunking (Absätze) -> lokales Embedding je Chunk im Browser
+      // Chunking (Absätze) -> lokales Embedding je Chunk im Browser
       // (MiniLM, 384 Dim., kein AI-Guthaben nötig) -> Insert in essay_chunks.
       const chunks = chunkText(payload.content);
       const embeddings = await embedManyLocally(chunks, setProgress);
       setProgress(null);
-      const res = await ingest({ data: { ...payload, embeddings } });
-      pending.current = null;
-      setStatus({ kind: "ok", text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.` });
-      setTitle("");
-      setSource("");
-      setContent("");
+      const res = payload.id
+        ? await update({
+            data: {
+              id: payload.id,
+              title: payload.title,
+              source: payload.source,
+              content: payload.content,
+              embeddings,
+            },
+          })
+        : await ingest({
+            data: {
+              title: payload.title,
+              source: payload.source,
+              content: payload.content,
+              embeddings,
+            },
+          });
+      const wasEdit = Boolean(payload.id);
+      resetForm();
+      setStatus({
+        kind: "ok",
+        text: wasEdit
+          ? `Essay aktualisiert, ${res.chunk_count} Absätze neu eingebettet.`
+          : `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.`,
+      });
       void loadEssays();
     } catch (err) {
       setProgress(null);
-      const text = err instanceof Error ? err.message : "Fehler beim Einfügen";
+      const text = err instanceof Error ? err.message : "Fehler beim Speichern";
       if (isCreditLimit(text)) {
         // Klarer Grund + automatischer Neustart nach Backoff.
         scheduleRetry(attempt + 1, text);
@@ -147,9 +228,10 @@ function Admin() {
     const c = String(fd.get("content") || "").trim();
     if (!t || !c) return;
     cancelled.current = false;
-    pending.current = { title: t, source: s || null, content: c };
+    pending.current = { id: editingId, title: t, source: s || null, content: c };
     await runIngest(1);
   }
+
 
 
   return (
