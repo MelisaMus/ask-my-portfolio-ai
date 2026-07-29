@@ -15,6 +15,14 @@ const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1";
 const EMBED_MODEL = "openai/text-embedding-3-small"; // 1536 dims -> matches vector(1536) column
 const CHAT_MODEL = "google/gemini-3.6-flash";
 
+/** Map gateway HTTP errors to messages the UI can show directly. */
+function gatewayError(status: number, body: string): Error {
+  if (status === 429) return new Error("Zu viele Anfragen an die KI – bitte kurz warten und erneut versuchen.");
+  if (status === 402 || status === 403)
+    return new Error("KI-Guthaben/Limit des Workspace ist erreicht. Bitte unter Settings → Plans & credits anheben.");
+  return new Error(`KI-Dienst-Fehler ${status}: ${body.slice(0, 200)}`);
+}
+
 async function embed(text: string): Promise<number[]> {
   const key = process.env.LOVABLE_API_KEY;
   if (!key) throw new Error("Missing LOVABLE_API_KEY");
@@ -26,10 +34,11 @@ async function embed(text: string): Promise<number[]> {
     },
     body: JSON.stringify({ model: EMBED_MODEL, input: text }),
   });
-  if (!res.ok) throw new Error(`Embedding failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw gatewayError(res.status, await res.text());
   const json = await res.json();
   return json.data[0].embedding as number[];
 }
+
 
 /** Split an essay into paragraphs. Empty lines are the boundary. */
 function chunkText(content: string): string[] {
@@ -185,7 +194,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
 
-    const sources = (matches ?? []) as Array<{
+    const allMatches = (matches ?? []) as Array<{
       chunk_id: string;
       essay_id: string;
       title: string;
@@ -194,6 +203,12 @@ export const askPortfolio = createServerFn({ method: "POST" })
       content: string;
       similarity: number;
     }>;
+
+    // Keep the 3-5 best chunks: everything above the similarity threshold,
+    // but always at least the top 3 so the LLM never runs without context.
+    const relevant = allMatches.filter((m) => m.similarity >= DEFAULT_SIMILARITY_THRESHOLD);
+    const sources = (relevant.length >= 3 ? relevant : allMatches.slice(0, 3)).slice(0, 5);
+
 
     if (sources.length === 0) {
       return {
@@ -229,7 +244,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
         ],
       }),
     });
-    if (!chatRes.ok) throw new Error(`Chat failed: ${chatRes.status} ${await chatRes.text()}`);
+    if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
     const chatJson = await chatRes.json();
     const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
 
