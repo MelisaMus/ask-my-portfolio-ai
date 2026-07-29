@@ -105,30 +105,45 @@ export const ingestEssay = createServerFn({ method: "POST" })
 
 const AskSchema = z.object({ question: z.string().min(2) });
 
+/** Default cosine-similarity cutoff for retrieval (0 = alles, 1 = identisch). */
+export const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
+
+const SearchSchema = z.object({
+  question: z.string().min(2),
+  threshold: z.number().min(0).max(1).optional(),
+});
+
+type MatchRow = {
+  chunk_id: string;
+  essay_id: string;
+  title: string;
+  source: string | null;
+  chunk_index: number;
+  content: string;
+  similarity: number;
+};
+
 /**
  * Retrieval-only variant: embed the question, return the top-5 chunks with
  * similarity scores. Useful for debugging the RAG index without invoking the LLM.
+ * Treffer unterhalb des konfigurierbaren Thresholds werden herausgefiltert.
  */
 export const searchPortfolio = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => AskSchema.parse(data))
+  .inputValidator((data: unknown) => SearchSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const threshold = data.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const queryEmbedding = await embed(data.question);
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
       query_embedding: queryEmbedding as unknown as string,
       match_count: 5,
     });
     if (error) throw new Error(error.message);
+    const all = (matches ?? []) as MatchRow[];
     return {
-      matches: (matches ?? []) as Array<{
-        chunk_id: string;
-        essay_id: string;
-        title: string;
-        source: string | null;
-        chunk_index: number;
-        content: string;
-        similarity: number;
-      }>,
+      threshold,
+      retrieved: all.length,
+      matches: all.filter((m) => m.similarity >= threshold),
     };
   });
 
