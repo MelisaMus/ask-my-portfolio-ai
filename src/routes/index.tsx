@@ -79,6 +79,7 @@ function Index() {
   const [retrieved, setRetrieved] = useState(0);
   // Vorschau der Absätze, die im normalen Modus als Kontext ans LLM gehen.
   const [contextPreview, setContextPreview] = useState<Match[]>([]);
+  const [showContext, setShowContext] = useState(true);
   const [expandedChunkId, setExpandedChunkId] = useState<string | null>(null);
   // Im Test-Modus geklickter Treffer -> Detail-Sidepanel
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
@@ -320,37 +321,48 @@ function Index() {
 
       {!testMode && contextPreview.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Kontext für das LLM ({contextPreview.length} Absätze)
-            {loading && " · Antwort wird erzeugt…"}
-          </h2>
-          <ol className="space-y-2">
-            {contextPreview.map((m, i) => (
-              <li
-                key={m.chunk_id}
-                className="rounded-md border border-border bg-muted/30 p-3 text-xs"
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="font-medium text-foreground">
-                    <span className="text-muted-foreground">[{i + 1}] </span>
-                    {m.title}
-                    {m.source && (
-                      <span className="ml-2 font-normal text-muted-foreground">— {m.source}</span>
-                    )}
-                    <span className="ml-2 font-normal text-muted-foreground">
-                      · Absatz {m.chunk_index + 1}
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Kontext für das LLM ({contextPreview.length} Absätze)
+              {loading && " · Antwort wird erzeugt…"}
+            </h2>
+            <button
+              type="button"
+              onClick={() => setShowContext((v) => !v)}
+              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              {showContext ? "Kontext ausblenden" : "Kontext einblenden"}
+            </button>
+          </div>
+          {showContext && (
+            <ol className="space-y-2">
+              {contextPreview.map((m, i) => (
+                <li
+                  key={m.chunk_id}
+                  className="rounded-md border border-border bg-muted/30 p-3 text-xs"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="font-medium text-foreground">
+                      <span className="text-muted-foreground">[{i + 1}] </span>
+                      {m.title}
+                      {m.source && (
+                        <span className="ml-2 font-normal text-muted-foreground">— {m.source}</span>
+                      )}
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        · Absatz {m.chunk_index + 1}
+                      </span>
+                    </p>
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
+                      {m.similarity.toFixed(3)}
                     </span>
+                  </div>
+                  <p className="mt-1 line-clamp-3 leading-relaxed text-muted-foreground">
+                    {m.content}
                   </p>
-                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
-                    {m.similarity.toFixed(3)}
-                  </span>
-                </div>
-                <p className="mt-1 line-clamp-3 leading-relaxed text-muted-foreground">
-                  {m.content}
-                </p>
-              </li>
-            ))}
-          </ol>
+                </li>
+              ))}
+            </ol>
+          )}
         </section>
       )}
 
