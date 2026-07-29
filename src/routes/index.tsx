@@ -260,7 +260,19 @@ function Index() {
           </div>
           <ol className="space-y-3">
             {matches.map((m, i) => (
-              <li key={m.chunk_id} className="rounded-md border border-border bg-background p-3 text-sm">
+              <li
+                key={m.chunk_id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedMatch(m)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedMatch(m);
+                  }
+                }}
+                className="cursor-pointer rounded-md border border-border bg-background p-3 text-sm transition-colors hover:border-primary/50 hover:bg-muted/40"
+              >
                 <div className="flex items-baseline justify-between gap-2">
                   <p className="font-medium">
                     <span className="text-muted-foreground">[{i + 1}] </span>
