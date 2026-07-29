@@ -125,7 +125,9 @@ function Index() {
         // Schritt 2: eigentliche RAG-Antwort (retrievt serverseitig erneut).
         const res = await ask({ data: { question, embedding } });
         setAnswer(res.answer);
+        setIsFallback(res.fallback);
         setSources(res.sources);
+
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
