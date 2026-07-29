@@ -453,9 +453,12 @@ export const askPortfolio = createServerFn({ method: "POST" })
       "Nutze dabei die mitgelieferte Absatz-Information, z. B. [1, Absatz 3], wenn du auf einen konkreten Absatz verweist. " +
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
 
+    const provider = openaiKey ? "openai" : "lovable-gateway";
+    const baseUrl = openaiKey ? OPENAI_URL : GATEWAY_URL;
+    const model = openaiKey ? OPENAI_MODEL : CHAT_MODEL;
+    const startedAt = Date.now();
+
     try {
-      const baseUrl = openaiKey ? OPENAI_URL : GATEWAY_URL;
-      const model = openaiKey ? OPENAI_MODEL : CHAT_MODEL;
       const chatRes = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
@@ -472,27 +475,45 @@ export const askPortfolio = createServerFn({ method: "POST" })
             },
           ],
         }),
+        // Ohne Timeout hängt eine tote Verbindung bis zum Worker-Limit.
+        signal: AbortSignal.timeout(30_000),
       });
-      if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
+      if (!chatRes.ok) throw httpFailure(chatRes.status, await chatRes.text());
 
-      const chatJson = await chatRes.json();
-      const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
-      if (!answer.trim()) throw new Error("Leere LLM-Antwort");
+      const chatJson = (await chatRes.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const answer = chatJson.choices?.[0]?.message?.content ?? "";
+      if (!answer.trim())
+        throw new LlmError("empty_response", "Die KI hat keine verwertbare Antwort geliefert.", 200);
+
+      console.info(
+        `[askPortfolio] ok provider=${provider} model=${model} ms=${Date.now() - startedAt} chunks=${sources.length}`,
+      );
       return { answer, fallback: false, sources: sourceList };
     } catch (err) {
-      // 4. Fallback: kein LLM verfügbar (Credit-/Rate-Limit) -> extraktive
-      // Zusammenfassung direkt aus den gefundenen Absätzen, inkl. Quellen.
-      // Grund serverseitig loggen, damit echte Bugs nicht stillschweigend
-      // als "Credit-Limit" durchgehen.
-      console.error("[askPortfolio] LLM-Aufruf fehlgeschlagen:", err);
-      const reason = err instanceof Error ? err.message : String(err);
+      // 4. Fallback: extraktive Antwort aus den gefundenen Absätzen.
+      // Jeder Fehler wird klassifiziert geloggt – Kontingentgrenzen als warn,
+      // echte API-/Netz-/Codefehler als error, damit sie nicht als
+      // "Credit-Limit" durchgehen.
+      const failure = transportFailure(err);
+      const isQuota = QUOTA_KINDS.has(failure.kind);
+      const logLine =
+        `[askPortfolio] LLM fehlgeschlagen kind=${failure.kind} provider=${provider} model=${model}` +
+        ` status=${failure.status ?? "-"} ms=${Date.now() - startedAt} msg=${failure.message}` +
+        (failure.detail ? ` detail=${failure.detail}` : "");
+      if (isQuota) console.warn(logLine);
+      else console.error(logLine, err);
+
       return {
-        answer: extractiveAnswer(data.question, sources),
+        answer: extractiveAnswer(data.question, sources, failure.message),
         fallback: true,
-        fallback_reason: reason,
+        fallback_kind: failure.kind,
+        fallback_reason: failure.message,
         sources: sourceList,
       };
     }
+
 
   });
 
