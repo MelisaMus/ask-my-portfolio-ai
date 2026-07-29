@@ -207,9 +207,10 @@ function Admin() {
         {/* Ingest-Statusanzeige: laufend / Auto-Retry bei Credit-Limit / Erfolg / Fehler */}
         {status.kind === "running" && (
           <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-            Ingest läuft… (Versuch {status.attempt}) – Absätze werden eingebettet.
+            {progress ?? `Ingest läuft… (Versuch ${status.attempt}) – Absätze werden lokal eingebettet.`}
           </p>
         )}
+
         {status.kind === "waiting" && (
           <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
             <p className="font-medium text-destructive">
