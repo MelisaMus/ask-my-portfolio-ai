@@ -27,14 +27,70 @@ const OPENAI_MODEL = "gpt-4o-mini";
 /** Dimension des lokalen MiniLM-Modells – muss zu vector(384) passen. */
 const EMBEDDING_DIM = 384;
 
-/** Map gateway HTTP errors to messages the UI can show directly. */
-function gatewayError(status: number, body: string): Error {
-  if (status === 429) return new Error("Zu viele Anfragen an die KI – bitte kurz warten und erneut versuchen.");
-  if (status === 401) return new Error("Der hinterlegte OpenAI-API-Key ist ungültig.");
-  if (status === 402 || status === 403)
-    return new Error("KI-Guthaben/Limit ist erreicht. Bitte Guthaben aufladen.");
-  return new Error(`KI-Dienst-Fehler ${status}: ${body.slice(0, 200)}`);
+/**
+ * Fehlerklassen im LLM-Pfad. Wichtig: ein Credit-/Kontingent-Problem ist etwas
+ * anderes als ein echter API-, Netzwerk- oder Bugfehler – nur so lassen sich
+ * Fehler im Log auseinanderhalten statt von einem Catch-all maskiert zu werden.
+ */
+export type LlmFailureKind =
+  | "credit_limit" // 402/403: Guthaben oder Workspace-Limit erschöpft
+  | "rate_limit" // 429: zu viele Anfragen
+  | "auth" // 401: Key ungültig/abgelaufen
+  | "bad_request" // 4xx: Prompt/Modell/Payload fehlerhaft -> unser Bug
+  | "provider_error" // 5xx beim Anbieter
+  | "network" // DNS/TLS/Verbindung abgebrochen
+  | "timeout" // Antwort kam nicht rechtzeitig
+  | "empty_response" // HTTP 200, aber kein verwertbarer Text
+  | "missing_key" // gar kein Key hinterlegt – Konfigurationsproblem
+  | "unknown"; // alles andere -> immer verdächtig, nie als Limit deuten
+
+/** Nur diese Klassen sind "erwartete" Kontingentgrenzen, kein Defekt. */
+const QUOTA_KINDS = new Set<LlmFailureKind>(["credit_limit", "rate_limit"]);
+
+/** Fehler mit Klassifikation, damit UI und Logging denselben Grund kennen. */
+class LlmError extends Error {
+  constructor(
+    readonly kind: LlmFailureKind,
+    message: string,
+    /** HTTP-Status, sofern es überhaupt eine Antwort gab. */
+    readonly status?: number,
+    /** Gekürzter Rohtext der Anbieter-Antwort – nur fürs Log. */
+    readonly detail?: string,
+  ) {
+    super(message);
+    this.name = "LlmError";
+  }
 }
+
+/** HTTP-Fehlerantwort -> klassifizierter Fehler mit UI-tauglichem Text. */
+function httpFailure(status: number, body: string): LlmError {
+  const detail = body.slice(0, 500);
+  if (status === 429)
+    return new LlmError("rate_limit", "Zu viele Anfragen an die KI – bitte kurz warten und erneut versuchen.", status, detail);
+  if (status === 401 || status === 403)
+    // 403 bedeutet beim Lovable-Gateway "Workspace-Limit", bei OpenAI dagegen
+    // ein Key-/Berechtigungsproblem – deshalb am Antworttext unterscheiden.
+    return /credit|quota|limit|billing/i.test(body)
+      ? new LlmError("credit_limit", "KI-Guthaben/Limit ist erreicht. Bitte Guthaben aufladen.", status, detail)
+      : new LlmError("auth", "Der hinterlegte API-Key ist ungültig oder nicht berechtigt.", status, detail);
+  if (status === 402)
+    return new LlmError("credit_limit", "KI-Guthaben/Limit ist erreicht. Bitte Guthaben aufladen.", status, detail);
+  if (status >= 500)
+    return new LlmError("provider_error", `Der KI-Dienst antwortet gerade nicht (Fehler ${status}).`, status, detail);
+  return new LlmError("bad_request", `Fehlerhafte Anfrage an den KI-Dienst (${status}).`, status, detail);
+}
+
+/** Ausnahme aus fetch()/JSON-Parsing -> klassifizierter Fehler. */
+function transportFailure(err: unknown): LlmError {
+  if (err instanceof LlmError) return err;
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError"))
+    return new LlmError("timeout", "Der KI-Dienst hat nicht rechtzeitig geantwortet.", undefined, message);
+  if (err instanceof TypeError)
+    return new LlmError("network", "Der KI-Dienst war nicht erreichbar (Netzwerkfehler).", undefined, message);
+  return new LlmError("unknown", `Unerwarteter Fehler im KI-Pfad: ${message}`, undefined, message);
+}
+
 
 
 const VectorSchema = z.array(z.number()).length(EMBEDDING_DIM);
@@ -299,7 +355,7 @@ export const searchPortfolio = createServerFn({ method: "POST" })
  * Sätze der gefundenen Absätze zu einer kurzen Zusammenfassung montiert –
  * jeweils mit Quellen-Referenz [n].
  */
-function extractiveAnswer(question: string, sources: MatchRow[]): string {
+function extractiveAnswer(question: string, sources: MatchRow[], reason?: string): string {
   // Frage-Stichwörter (ohne Kurzwörter) für ein simples Keyword-Scoring der Sätze.
   const terms = question
     .toLowerCase()
@@ -327,10 +383,11 @@ function extractiveAnswer(question: string, sources: MatchRow[]): string {
   });
 
   return (
-    "Hinweis: Die KI-Antwort ist derzeit nicht verfügbar (Credit-Limit). " +
+    `Hinweis: Die KI-Antwort ist derzeit nicht verfügbar${reason ? ` (${reason})` : ""}. ` +
     "Hier stattdessen die passendsten Stellen direkt aus den Texten:\n\n" +
     lines.join("\n\n")
   );
+
 }
 
 export const askPortfolio = createServerFn({ method: "POST" })
@@ -384,7 +441,14 @@ export const askPortfolio = createServerFn({ method: "POST" })
 
     // Ohne API-Key gar nicht erst das Gateway aufrufen -> direkt extraktiv antworten.
     if (!key) {
-      return { answer: extractiveAnswer(data.question, sources), fallback: true, sources: sourceList };
+      console.warn("[askPortfolio] kein API-Key konfiguriert – extraktiver Fallback");
+      return {
+        answer: extractiveAnswer(data.question, sources, "kein API-Key konfiguriert"),
+        fallback: true,
+        fallback_kind: "missing_key" as LlmFailureKind,
+        fallback_reason: "Es ist kein KI-API-Key konfiguriert.",
+        sources: sourceList,
+      };
     }
 
     // 3. Build a grounded prompt and ask the LLM to cite by [n]
@@ -398,9 +462,12 @@ export const askPortfolio = createServerFn({ method: "POST" })
       "Nutze dabei die mitgelieferte Absatz-Information, z. B. [1, Absatz 3], wenn du auf einen konkreten Absatz verweist. " +
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
 
+    const provider = openaiKey ? "openai" : "lovable-gateway";
+    const baseUrl = openaiKey ? OPENAI_URL : GATEWAY_URL;
+    const model = openaiKey ? OPENAI_MODEL : CHAT_MODEL;
+    const startedAt = Date.now();
+
     try {
-      const baseUrl = openaiKey ? OPENAI_URL : GATEWAY_URL;
-      const model = openaiKey ? OPENAI_MODEL : CHAT_MODEL;
       const chatRes = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
@@ -417,27 +484,45 @@ export const askPortfolio = createServerFn({ method: "POST" })
             },
           ],
         }),
+        // Ohne Timeout hängt eine tote Verbindung bis zum Worker-Limit.
+        signal: AbortSignal.timeout(30_000),
       });
-      if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
+      if (!chatRes.ok) throw httpFailure(chatRes.status, await chatRes.text());
 
-      const chatJson = await chatRes.json();
-      const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
-      if (!answer.trim()) throw new Error("Leere LLM-Antwort");
+      const chatJson = (await chatRes.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const answer = chatJson.choices?.[0]?.message?.content ?? "";
+      if (!answer.trim())
+        throw new LlmError("empty_response", "Die KI hat keine verwertbare Antwort geliefert.", 200);
+
+      console.info(
+        `[askPortfolio] ok provider=${provider} model=${model} ms=${Date.now() - startedAt} chunks=${sources.length}`,
+      );
       return { answer, fallback: false, sources: sourceList };
     } catch (err) {
-      // 4. Fallback: kein LLM verfügbar (Credit-/Rate-Limit) -> extraktive
-      // Zusammenfassung direkt aus den gefundenen Absätzen, inkl. Quellen.
-      // Grund serverseitig loggen, damit echte Bugs nicht stillschweigend
-      // als "Credit-Limit" durchgehen.
-      console.error("[askPortfolio] LLM-Aufruf fehlgeschlagen:", err);
-      const reason = err instanceof Error ? err.message : String(err);
+      // 4. Fallback: extraktive Antwort aus den gefundenen Absätzen.
+      // Jeder Fehler wird klassifiziert geloggt – Kontingentgrenzen als warn,
+      // echte API-/Netz-/Codefehler als error, damit sie nicht als
+      // "Credit-Limit" durchgehen.
+      const failure = transportFailure(err);
+      const isQuota = QUOTA_KINDS.has(failure.kind);
+      const logLine =
+        `[askPortfolio] LLM fehlgeschlagen kind=${failure.kind} provider=${provider} model=${model}` +
+        ` status=${failure.status ?? "-"} ms=${Date.now() - startedAt} msg=${failure.message}` +
+        (failure.detail ? ` detail=${failure.detail}` : "");
+      if (isQuota) console.warn(logLine);
+      else console.error(logLine, err);
+
       return {
-        answer: extractiveAnswer(data.question, sources),
+        answer: extractiveAnswer(data.question, sources, failure.message),
         fallback: true,
-        fallback_reason: reason,
+        fallback_kind: failure.kind,
+        fallback_reason: failure.message,
         sources: sourceList,
       };
     }
+
 
   });
 
