@@ -54,6 +54,7 @@ type Match = {
   content: string;
   similarity: number;
   // Debug-Metadaten aus searchPortfolio
+  above_threshold: boolean;
   chunk_total: number;
   char_count: number;
   word_count: number;
@@ -82,6 +83,10 @@ function Index() {
   // Konfigurierbarer Similarity-Threshold: Treffer darunter werden verworfen.
   const [threshold, setThreshold] = useState(0.3);
   const [retrieved, setRetrieved] = useState(0);
+  // Wie viele Treffer lagen tatsächlich über dem Threshold …
+  const [aboveCount, setAboveCount] = useState(0);
+  // … und wurden schwächere Chunks ergänzt, um das Kontext-Minimum zu erreichen?
+  const [filled, setFilled] = useState(false);
   // Vorschau der Absätze, die im normalen Modus als Kontext ans LLM gehen.
   const [contextPreview, setContextPreview] = useState<Match[]>([]);
   const [showContext, setShowContext] = useState(true);
@@ -117,21 +122,24 @@ function Index() {
       setModelStatus(null);
 
       if (testMode) {
-        // Retrieval-only: skip the LLM, show raw top-5 chunks + similarity scores.
+        // Retrieval-only: kein LLM, dafür exakt die Chunk-Auswahl,
+        // die der Chat mit demselben Threshold als Kontext nutzen würde.
         const res = await search({ data: { question, embedding, threshold } });
         setMatches(res.matches);
         setRetrieved(res.retrieved);
+        setAboveCount(res.above_count);
+        setFilled(res.filled);
       } else {
         // Schritt 1: Retrieval separat ausführen, damit die Kontext-Absätze
-        // schon sichtbar sind, bevor das LLM antwortet.
-        const pre = await search({ data: { question, embedding, threshold: 0 } });
+        // schon sichtbar sind, bevor das LLM antwortet – mit demselben
+        // Threshold wie der Ask-Aufruf, also identische Auswahl.
+        const pre = await search({ data: { question, embedding, threshold } });
         setContextPreview(pre.matches);
         // Schritt 2: eigentliche RAG-Antwort (retrievt serverseitig erneut).
-        const res = await ask({ data: { question, embedding } });
+        const res = await ask({ data: { question, embedding, threshold } });
         setAnswer(res.answer);
         setIsFallback(res.fallback);
         setSources(res.sources);
-
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
@@ -230,7 +238,7 @@ function Index() {
             Test-Modus (Top-5 Chunks ohne LLM)
           </label>
         </div>
-        {testMode && (
+        <div className="space-y-1">
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <label htmlFor="threshold" className="whitespace-nowrap">
               Similarity-Threshold
@@ -247,7 +255,12 @@ function Index() {
             />
             <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{threshold.toFixed(2)}</span>
           </div>
-        )}
+          <p className="text-[11px] text-muted-foreground">
+            Gilt für Test-Modus und Chat gleichermaßen. Liegen weniger als 3 Treffer darüber, werden
+            schwächere Chunks ergänzt, damit das LLM nie ohne Kontext antwortet.
+          </p>
+        </div>
+
       </form>
 
       {error && (
@@ -266,7 +279,8 @@ function Index() {
         <section className="mt-8">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Retrieval-Ergebnisse · {matches.length}/{retrieved} über Threshold {threshold.toFixed(2)}
+              Kontext-Auswahl · {aboveCount}/{retrieved} über Threshold {threshold.toFixed(2)}
+              {filled && <span className="ml-1 normal-case">· mit schwächeren Chunks aufgefüllt</span>}
             </h2>
             <button
               type="button"

@@ -16,6 +16,8 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+/** Chunking-Logik ist für Client und Server dieselbe (src/lib/chunking.ts). */
+import { chunkText } from "./chunking";
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1";
 const CHAT_MODEL = "google/gemini-3.6-flash";
@@ -37,13 +39,9 @@ function gatewayError(status: number, body: string): Error {
 
 const VectorSchema = z.array(z.number()).length(EMBEDDING_DIM);
 
-/** Split an essay into paragraphs. Empty lines are the boundary. */
-function chunkText(content: string): string[] {
-  return content
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-}
+
+
+
 
 const IngestSchema = z.object({
   title: z.string().min(1),
@@ -195,19 +193,20 @@ export const deleteEssay = createServerFn({ method: "POST" })
   });
 
 
-const AskSchema = z.object({
-  question: z.string().min(2),
-  embedding: VectorSchema,
-});
-
 /** Default cosine-similarity cutoff for retrieval (0 = alles, 1 = identisch). */
 const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
+/** So viele Chunks gehen mindestens in den Kontext, auch unter dem Threshold. */
+const MIN_CONTEXT_CHUNKS = 3;
+/** Obergrenze der Kontext-Chunks (Top-k aus der Vektorsuche). */
+const MATCH_COUNT = 5;
 
-const SearchSchema = z.object({
+const AskSchema = z.object({
   question: z.string().min(2),
   embedding: VectorSchema,
   threshold: z.number().min(0).max(1).optional(),
 });
+
+const SearchSchema = AskSchema;
 
 type MatchRow = {
   chunk_id: string;
@@ -220,8 +219,45 @@ type MatchRow = {
 };
 
 /**
+ * EINE gemeinsame Auswahlregel für Test-Modus und Chat, damit der Threshold-
+ * Regler exakt das zeigt, was der Chat später ans LLM schickt:
+ * alles über dem Threshold, aber nie weniger als MIN_CONTEXT_CHUNKS
+ * (sonst hätte das LLM gar keinen Kontext).
+ */
+function selectContext(all: MatchRow[], threshold: number) {
+  const above = all.filter((m) => m.similarity >= threshold);
+  const selected = (above.length >= MIN_CONTEXT_CHUNKS ? above : all.slice(0, MIN_CONTEXT_CHUNKS)).slice(
+    0,
+    MATCH_COUNT,
+  );
+  return {
+    selected,
+    aboveCount: above.length,
+    // true = es wurden Chunks UNTER dem Threshold ergänzt, um auf das Minimum zu kommen
+    filled: above.length < selected.length,
+  };
+}
+
+/** Absatz-Gesamtzahl je Essay – eine Abfrage statt einer pro Essay (N+1). */
+async function chunkTotals(
+  supabaseAdmin: { from: (t: string) => any },
+  essayIds: string[],
+): Promise<Record<string, number>> {
+  const totals: Record<string, number> = {};
+  if (essayIds.length === 0) return totals;
+  const { data } = await supabaseAdmin
+    .from("essay_chunks")
+    .select("essay_id")
+    .in("essay_id", essayIds);
+  for (const row of (data ?? []) as { essay_id: string }[]) {
+    totals[row.essay_id] = (totals[row.essay_id] ?? 0) + 1;
+  }
+  return totals;
+}
+
+/**
  * Retrieval-only variant: nimmt das lokal erzeugte Frage-Embedding und liefert
- * die Top-5 Chunks samt Similarity-Score, ohne das LLM aufzurufen.
+ * die Kontext-Auswahl samt Similarity-Score, ohne das LLM aufzurufen.
  */
 export const searchPortfolio = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => SearchSchema.parse(data))
@@ -230,37 +266,31 @@ export const searchPortfolio = createServerFn({ method: "POST" })
     const threshold = data.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
       query_embedding: JSON.stringify(data.embedding) as unknown as string,
-      match_count: 5,
+      match_count: MATCH_COUNT,
     });
     if (error) throw new Error(error.message);
     const all = (matches ?? []) as MatchRow[];
-    const filtered = all.filter((m) => m.similarity >= threshold);
+    const { selected, aboveCount, filled } = selectContext(all, threshold);
 
     // Debug-Metadaten: Gesamtzahl der Absätze je Essay, damit die UI
     // "Absatz 3 von 12" statt nur "Absatz 3" anzeigen kann.
-    const essayIds = [...new Set(filtered.map((m) => m.essay_id))];
-    const totals: Record<string, number> = {};
-    await Promise.all(
-      essayIds.map(async (id) => {
-        const { count } = await supabaseAdmin
-          .from("essay_chunks")
-          .select("id", { count: "exact", head: true })
-          .eq("essay_id", id);
-        totals[id] = count ?? 0;
-      }),
-    );
+    const totals = await chunkTotals(supabaseAdmin, [...new Set(selected.map((m) => m.essay_id))]);
 
     return {
       threshold,
       retrieved: all.length,
-      matches: filtered.map((m) => ({
+      above_count: aboveCount,
+      filled,
+      matches: selected.map((m) => ({
         ...m,
+        above_threshold: m.similarity >= threshold,
         chunk_total: totals[m.essay_id] ?? 0,
         char_count: m.content.length,
         word_count: m.content.trim().split(/\s+/).filter(Boolean).length,
       })),
     };
   });
+
 
 /**
  * Extraktiver Fallback ohne LLM.
@@ -314,19 +344,18 @@ export const askPortfolio = createServerFn({ method: "POST" })
 
 
     // 1. Frage-Embedding kommt fertig aus dem Browser (lokales MiniLM).
-    // 2. Retrieve top-5 most similar chunks via pgvector cosine similarity
+    // 2. Retrieve top-k most similar chunks via pgvector cosine similarity
+    const threshold = data.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
       query_embedding: JSON.stringify(data.embedding) as unknown as string,
-      match_count: 5,
+      match_count: MATCH_COUNT,
     });
     if (error) throw new Error(error.message);
 
     const allMatches = (matches ?? []) as MatchRow[];
 
-    // Keep the 3-5 best chunks: everything above the similarity threshold,
-    // but always at least the top 3 so the LLM never runs without context.
-    const relevant = allMatches.filter((m) => m.similarity >= DEFAULT_SIMILARITY_THRESHOLD);
-    const sources = (relevant.length >= 3 ? relevant : allMatches.slice(0, 3)).slice(0, 5);
+    // Exakt dieselbe Auswahlregel wie im Test-Modus (selectContext).
+    const { selected: sources } = selectContext(allMatches, threshold);
 
     if (sources.length === 0) {
       return {
@@ -338,17 +367,8 @@ export const askPortfolio = createServerFn({ method: "POST" })
 
     // Gesamtzahl der Absätze pro Essay ermitteln, damit die UI
     // "Absatz 3/12" anstatt nur "Absatz 3" anzeigen kann.
-    const essayIds = [...new Set(sources.map((s) => s.essay_id))];
-    const totals: Record<string, number> = {};
-    await Promise.all(
-      essayIds.map(async (id) => {
-        const { count } = await supabaseAdmin
-          .from("essay_chunks")
-          .select("id", { count: "exact", head: true })
-          .eq("essay_id", id);
-        totals[id] = count ?? 0;
-      }),
-    );
+    const totals = await chunkTotals(supabaseAdmin, [...new Set(sources.map((s) => s.essay_id))]);
+
 
     const sourceList = sources.map((s, i) => ({
       ref: i + 1,
@@ -404,10 +424,20 @@ export const askPortfolio = createServerFn({ method: "POST" })
       const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
       if (!answer.trim()) throw new Error("Leere LLM-Antwort");
       return { answer, fallback: false, sources: sourceList };
-    } catch {
+    } catch (err) {
       // 4. Fallback: kein LLM verfügbar (Credit-/Rate-Limit) -> extraktive
       // Zusammenfassung direkt aus den gefundenen Absätzen, inkl. Quellen.
-      return { answer: extractiveAnswer(data.question, sources), fallback: true, sources: sourceList };
+      // Grund serverseitig loggen, damit echte Bugs nicht stillschweigend
+      // als "Credit-Limit" durchgehen.
+      console.error("[askPortfolio] LLM-Aufruf fehlgeschlagen:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      return {
+        answer: extractiveAnswer(data.question, sources),
+        fallback: true,
+        fallback_reason: reason,
+        sources: sourceList,
+      };
     }
+
   });
 

@@ -35,6 +35,12 @@ async function getExtractor(onProgress?: (msg: string) => void) {
         },
       });
     })();
+    // Bei Fehlschlag (z. B. Netzwerkabbruch beim ~25-MB-Download) das Singleton
+    // zurücksetzen, sonst bliebe die Session dauerhaft auf einer rejected
+    // Promise hängen und ein erneuter Versuch wäre unmöglich.
+    extractorPromise.catch(() => {
+      extractorPromise = null;
+    });
   }
   return extractorPromise;
 }
@@ -62,10 +68,6 @@ export async function embedManyLocally(
   return vectors;
 }
 
-/** Absatz-Chunking – identisch zur Server-Logik, damit Index & Vektoren passen. */
-export function chunkText(content: string): string[] {
-  return content
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-}
+/** Absatz-Chunking – eine gemeinsame Quelle für Client und Server. */
+export { chunkText } from "./chunking";
+
