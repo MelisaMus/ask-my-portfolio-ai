@@ -263,9 +263,18 @@ const AskSchema = z.object({
   question: z.string().min(2),
   embedding: VectorSchema,
   threshold: z.number().min(0).max(1).optional(),
+  /**
+   * Optionaler Gesprächsverlauf (nur die letzten Turns) aus dem Browser.
+   * Wird ausschließlich als Kontext an das LLM gegeben, nicht gespeichert.
+   */
+  history: z
+    .array(z.object({ question: z.string(), answer: z.string() }))
+    .max(8)
+    .optional(),
 });
 
-const SearchSchema = AskSchema;
+const SearchSchema = AskSchema.omit({ history: true });
+
 
 type MatchRow = {
   chunk_id: string;
