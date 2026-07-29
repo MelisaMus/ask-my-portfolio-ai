@@ -78,6 +78,33 @@ export const ingestEssay = createServerFn({ method: "POST" })
 
 const AskSchema = z.object({ question: z.string().min(2) });
 
+/**
+ * Retrieval-only variant: embed the question, return the top-5 chunks with
+ * similarity scores. Useful for debugging the RAG index without invoking the LLM.
+ */
+export const searchPortfolio = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => AskSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const queryEmbedding = await embed(data.question);
+    const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
+      query_embedding: queryEmbedding as unknown as string,
+      match_count: 5,
+    });
+    if (error) throw new Error(error.message);
+    return {
+      matches: (matches ?? []) as Array<{
+        chunk_id: string;
+        essay_id: string;
+        title: string;
+        source: string | null;
+        chunk_index: number;
+        content: string;
+        similarity: number;
+      }>,
+    };
+  });
+
 export const askPortfolio = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => AskSchema.parse(data))
   .handler(async ({ data }) => {
