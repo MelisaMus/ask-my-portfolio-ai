@@ -296,24 +296,46 @@ type MatchRow = {
 };
 
 /**
+ * Diversitäts-Regel: pro Essay höchstens MAX_PER_ESSAY Chunks in der ersten
+ * Runde. Übrige Chunks werden hinten angehängt, damit die Liste bei wenigen
+ * Essays trotzdem voll wird. Ergebnis: Antworten stützen sich auf mehrere
+ * Texte statt auf fünf Absätze desselben Essays.
+ */
+function diversify(rows: MatchRow[]): MatchRow[] {
+  const perEssay: Record<string, number> = {};
+  const primary: MatchRow[] = [];
+  const overflow: MatchRow[] = [];
+  for (const row of rows) {
+    const used = perEssay[row.essay_id] ?? 0;
+    if (used < MAX_PER_ESSAY) {
+      perEssay[row.essay_id] = used + 1;
+      primary.push(row);
+    } else {
+      overflow.push(row);
+    }
+  }
+  return [...primary, ...overflow];
+}
+
+/**
  * EINE gemeinsame Auswahlregel für Test-Modus und Chat, damit der Threshold-
  * Regler exakt das zeigt, was der Chat später ans LLM schickt:
  * alles über dem Threshold, aber nie weniger als MIN_CONTEXT_CHUNKS
- * (sonst hätte das LLM gar keinen Kontext).
+ * (sonst hätte das LLM gar keinen Kontext) – anschließend nach Quellen
+ * diversifiziert und auf MATCH_COUNT gekürzt.
  */
 function selectContext(all: MatchRow[], threshold: number) {
   const above = all.filter((m) => m.similarity >= threshold);
-  const selected = (above.length >= MIN_CONTEXT_CHUNKS ? above : all.slice(0, MIN_CONTEXT_CHUNKS)).slice(
-    0,
-    MATCH_COUNT,
-  );
+  const pool = above.length >= MIN_CONTEXT_CHUNKS ? above : all.slice(0, MIN_CONTEXT_CHUNKS);
+  const selected = diversify(pool).slice(0, MATCH_COUNT);
   return {
     selected,
     aboveCount: above.length,
     // true = es wurden Chunks UNTER dem Threshold ergänzt, um auf das Minimum zu kommen
-    filled: above.length < selected.length,
+    filled: selected.some((m) => m.similarity < threshold),
   };
 }
+
 
 /** Absatz-Gesamtzahl je Essay – eine Abfrage statt einer pro Essay (N+1). */
 async function chunkTotals(
