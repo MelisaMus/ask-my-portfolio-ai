@@ -238,7 +238,7 @@ function Index() {
             Test-Modus (Top-5 Chunks ohne LLM)
           </label>
         </div>
-        {testMode && (
+        <div className="space-y-1">
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <label htmlFor="threshold" className="whitespace-nowrap">
               Similarity-Threshold
@@ -255,7 +255,12 @@ function Index() {
             />
             <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{threshold.toFixed(2)}</span>
           </div>
-        )}
+          <p className="text-[11px] text-muted-foreground">
+            Gilt für Test-Modus und Chat gleichermaßen. Liegen weniger als 3 Treffer darüber, werden
+            schwächere Chunks ergänzt, damit das LLM nie ohne Kontext antwortet.
+          </p>
+        </div>
+
       </form>
 
       {error && (
