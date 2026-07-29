@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { ingestEssay } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { chunkText, embedManyLocally } from "@/lib/local-embeddings";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -52,6 +53,8 @@ function Admin() {
   const [content, setContent] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [essays, setEssays] = useState<EssayRow[]>([]);
+  // Fortschritt des lokalen MiniLM-Modells (Download + Embedding je Absatz)
+  const [progress, setProgress] = useState<string | null>(null);
   // Zwischenspeicher, damit der Auto-Retry dieselben Daten erneut senden kann.
   const pending = useRef<{ title: string; source: string | null; content: string } | null>(null);
   const cancelled = useRef(false);
@@ -83,8 +86,12 @@ function Admin() {
     cancelled.current = true; // laufenden Countdown stoppen
     setStatus({ kind: "running", attempt });
     try {
-      // Ingest = Chunking (Absätze) -> Embedding je Chunk -> Insert in essay_chunks.
-      const res = await ingest({ data: payload });
+      // Ingest = Chunking (Absätze) -> lokales Embedding je Chunk im Browser
+      // (MiniLM, 384 Dim., kein AI-Guthaben nötig) -> Insert in essay_chunks.
+      const chunks = chunkText(payload.content);
+      const embeddings = await embedManyLocally(chunks, setProgress);
+      setProgress(null);
+      const res = await ingest({ data: { ...payload, embeddings } });
       pending.current = null;
       setStatus({ kind: "ok", text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.` });
       setTitle("");
@@ -92,6 +99,7 @@ function Admin() {
       setContent("");
       void loadEssays();
     } catch (err) {
+      setProgress(null);
       const text = err instanceof Error ? err.message : "Fehler beim Einfügen";
       if (isCreditLimit(text)) {
         // Klarer Grund + automatischer Neustart nach Backoff.
