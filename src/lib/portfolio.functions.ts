@@ -172,12 +172,53 @@ export const searchPortfolio = createServerFn({ method: "POST" })
     };
   });
 
+/**
+ * Extraktiver Fallback ohne LLM.
+ * Wird genutzt, wenn das AI Gateway nicht verfügbar ist (Credit-Limit, Rate-Limit,
+ * fehlender Key). Statt einer generierten Formulierung werden die relevantesten
+ * Sätze der gefundenen Absätze zu einer kurzen Zusammenfassung montiert –
+ * jeweils mit Quellen-Referenz [n].
+ */
+function extractiveAnswer(question: string, sources: MatchRow[]): string {
+  // Frage-Stichwörter (ohne Kurzwörter) für ein simples Keyword-Scoring der Sätze.
+  const terms = question
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 3);
+
+  const lines = sources.map((s, i) => {
+    const sentences = s.content
+      .split(/(?<=[.!?])\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length > 30);
+    const scored = sentences
+      .map((sentence) => {
+        const lower = sentence.toLowerCase();
+        const score = terms.reduce((acc, t) => acc + (lower.includes(t) ? 1 : 0), 0);
+        return { sentence, score };
+      })
+      .sort((a, b) => b.score - a.score);
+    // Bester Satz, sonst Anfang des Absatzes als Auszug.
+    const best =
+      scored[0]?.score > 0
+        ? scored[0].sentence
+        : (sentences[0] ?? s.content).slice(0, 220).trim();
+    return `„${best}“ [${i + 1}]`;
+  });
+
+  return (
+    "Hinweis: Die KI-Antwort ist derzeit nicht verfügbar (Credit-Limit). " +
+    "Hier stattdessen die passendsten Stellen direkt aus den Texten:\n\n" +
+    lines.join("\n\n")
+  );
+}
+
 export const askPortfolio = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => AskSchema.parse(data))
   .handler(async ({ data }) => {
     const key = process.env.LOVABLE_API_KEY;
-    if (!key) throw new Error("Missing LOVABLE_API_KEY");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
 
     // 1. Frage-Embedding kommt fertig aus dem Browser (lokales MiniLM).
     // 2. Retrieve top-5 most similar chunks via pgvector cosine similarity
@@ -197,8 +238,25 @@ export const askPortfolio = createServerFn({ method: "POST" })
     if (sources.length === 0) {
       return {
         answer: "In den vorhandenen Texten habe ich dazu nichts gefunden.",
+        fallback: false,
         sources: [],
       };
+    }
+
+    const sourceList = sources.map((s, i) => ({
+      ref: i + 1,
+      essay_id: s.essay_id,
+      title: s.title,
+      source: s.source,
+      // Absatz-Referenz (0-basiert im Index -> 1-basiert für die Anzeige)
+      chunk_index: s.chunk_index,
+      excerpt: s.content.length > 240 ? s.content.slice(0, 240) + "…" : s.content,
+      similarity: s.similarity,
+    }));
+
+    // Ohne API-Key gar nicht erst das Gateway aufrufen -> direkt extraktiv antworten.
+    if (!key) {
+      return { answer: extractiveAnswer(data.question, sources), fallback: true, sources: sourceList };
     }
 
     // 3. Build a grounded prompt and ask the LLM to cite by [n]
@@ -211,38 +269,33 @@ export const askPortfolio = createServerFn({ method: "POST" })
       "Antworte auf Deutsch, präzise und in 2-5 Sätzen. Zitiere die verwendeten Quellen mit [1], [2] etc. " +
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
 
-    const chatRes = await fetch(`${GATEWAY_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: CHAT_MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: `Frage: ${data.question}\n\nTextausschnitte:\n\n${context}`,
-          },
-        ],
-      }),
-    });
-    if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
-    const chatJson = await chatRes.json();
-    const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
-
-    return {
-      answer,
-      sources: sources.map((s, i) => ({
-        ref: i + 1,
-        essay_id: s.essay_id,
-        title: s.title,
-        source: s.source,
-        // Absatz-Referenz (0-basiert im Index -> 1-basiert für die Anzeige)
-        chunk_index: s.chunk_index,
-        excerpt: s.content.length > 240 ? s.content.slice(0, 240) + "…" : s.content,
-        similarity: s.similarity,
-      })),
-    };
+    try {
+      const chatRes = await fetch(`${GATEWAY_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model: CHAT_MODEL,
+          messages: [
+            { role: "system", content: systemPrompt },
+            {
+              role: "user",
+              content: `Frage: ${data.question}\n\nTextausschnitte:\n\n${context}`,
+            },
+          ],
+        }),
+      });
+      if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
+      const chatJson = await chatRes.json();
+      const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
+      if (!answer.trim()) throw new Error("Leere LLM-Antwort");
+      return { answer, fallback: false, sources: sourceList };
+    } catch {
+      // 4. Fallback: kein LLM verfügbar (Credit-/Rate-Limit) -> extraktive
+      // Zusammenfassung direkt aus den gefundenen Absätzen, inkl. Quellen.
+      return { answer: extractiveAnswer(data.question, sources), fallback: true, sources: sourceList };
+    }
   });
+

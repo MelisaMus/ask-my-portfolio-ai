@@ -73,6 +73,9 @@ function Index() {
   const [loading, setLoading] = useState(false);
   const [testMode, setTestMode] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
+  // true, wenn die Antwort ohne LLM (extraktiver Fallback) erzeugt wurde
+  const [isFallback, setIsFallback] = useState(false);
+
   const [sources, setSources] = useState<Source[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   // Konfigurierbarer Similarity-Threshold: Treffer darunter werden verworfen.
@@ -125,7 +128,9 @@ function Index() {
         // Schritt 2: eigentliche RAG-Antwort (retrievt serverseitig erneut).
         const res = await ask({ data: { question, embedding } });
         setAnswer(res.answer);
+        setIsFallback(res.fallback);
         setSources(res.sources);
+
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
@@ -386,9 +391,15 @@ function Index() {
       {answer && (
         <section className="mt-8">
           <div className="rounded-md border border-border bg-card p-4">
-            <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Antwort
+              {isFallback && (
+                <span className="rounded border border-border px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-muted-foreground">
+                  Ohne LLM · Auszüge aus den Texten
+                </span>
+              )}
             </h2>
+
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{answer}</p>
 
             {/* Quellenangabe direkt unter der Antwort: Titel + Absatz-Referenz + Zitat */}
