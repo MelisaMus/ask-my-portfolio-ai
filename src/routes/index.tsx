@@ -40,6 +40,7 @@ type Source = {
   title: string;
   source: string | null;
   chunk_index: number;
+  chunk_total: number;
   excerpt: string;
   similarity: number;
 };
