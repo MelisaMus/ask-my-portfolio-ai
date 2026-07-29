@@ -374,6 +374,9 @@ function Index() {
                           {s.source && (
                             <span className="ml-2 font-normal text-muted-foreground">— {s.source}</span>
                           )}
+                          <span className="ml-2 font-normal text-muted-foreground">
+                            · Absatz {s.chunk_index + 1}
+                          </span>
                         </p>
                         <span className="text-xs text-muted-foreground">
                           {(s.similarity * 100).toFixed(0)}%
@@ -395,8 +398,9 @@ function Index() {
                   );
                 })}
               </ol>
+              )}
             </div>
-          )}
+          </div>
         </section>
       )}
 
