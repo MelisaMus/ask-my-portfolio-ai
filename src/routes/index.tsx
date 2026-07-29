@@ -3,6 +3,13 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { askPortfolio, searchPortfolio } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -73,6 +80,8 @@ function Index() {
   // Vorschau der Absätze, die im normalen Modus als Kontext ans LLM gehen.
   const [contextPreview, setContextPreview] = useState<Match[]>([]);
   const [expandedChunkId, setExpandedChunkId] = useState<string | null>(null);
+  // Im Test-Modus geklickter Treffer -> Detail-Sidepanel
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Expanded full-essay content, keyed by essay_id
@@ -251,7 +260,19 @@ function Index() {
           </div>
           <ol className="space-y-3">
             {matches.map((m, i) => (
-              <li key={m.chunk_id} className="rounded-md border border-border bg-background p-3 text-sm">
+              <li
+                key={m.chunk_id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedMatch(m)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedMatch(m);
+                  }
+                }}
+                className="cursor-pointer rounded-md border border-border bg-background p-3 text-sm transition-colors hover:border-primary/50 hover:bg-muted/40"
+              >
                 <div className="flex items-baseline justify-between gap-2">
                   <p className="font-medium">
                     <span className="text-muted-foreground">[{i + 1}] </span>
@@ -280,9 +301,10 @@ function Index() {
                 {m.content.length > EXCERPT_LIMIT && (
                   <button
                     type="button"
-                    onClick={() =>
-                      setExpandedChunkId(expandedChunkId === m.chunk_id ? null : m.chunk_id)
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedChunkId(expandedChunkId === m.chunk_id ? null : m.chunk_id);
+                    }}
                     className="mt-1 text-xs text-primary underline underline-offset-4 hover:opacity-80"
                   >
                     {expandedChunkId === m.chunk_id
@@ -413,6 +435,32 @@ function Index() {
         </Link>
       </p>
 
+      {/* Sidepanel: voller Chunk-Text + Quelle (Test-Modus) */}
+      <Sheet open={!!selectedMatch} onOpenChange={(open) => !open && setSelectedMatch(null)}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+          {selectedMatch && (
+            <>
+              <SheetHeader>
+                <SheetTitle className="text-left">{selectedMatch.title}</SheetTitle>
+                <SheetDescription className="text-left">
+                  {selectedMatch.source ? `${selectedMatch.source} · ` : ""}
+                  Absatz {selectedMatch.chunk_index + 1}/{selectedMatch.chunk_total} · Similarity{" "}
+                  {selectedMatch.similarity.toFixed(4)}
+                </SheetDescription>
+              </SheetHeader>
+              <div className="mt-4 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+                <span>{selectedMatch.char_count} Zeichen</span>
+                <span>{selectedMatch.word_count} Wörter</span>
+                <span>chunk {selectedMatch.chunk_id.slice(0, 8)}</span>
+                <span>essay {selectedMatch.essay_id.slice(0, 8)}</span>
+              </div>
+              <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                {selectedMatch.content}
+              </p>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </main>
   );
 }
