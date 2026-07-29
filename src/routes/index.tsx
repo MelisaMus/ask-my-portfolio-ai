@@ -435,6 +435,32 @@ function Index() {
         </Link>
       </p>
 
+      {/* Sidepanel: voller Chunk-Text + Quelle (Test-Modus) */}
+      <Sheet open={!!selectedMatch} onOpenChange={(open) => !open && setSelectedMatch(null)}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+          {selectedMatch && (
+            <>
+              <SheetHeader>
+                <SheetTitle className="text-left">{selectedMatch.title}</SheetTitle>
+                <SheetDescription className="text-left">
+                  {selectedMatch.source ? `${selectedMatch.source} · ` : ""}
+                  Absatz {selectedMatch.chunk_index + 1}/{selectedMatch.chunk_total} · Similarity{" "}
+                  {selectedMatch.similarity.toFixed(4)}
+                </SheetDescription>
+              </SheetHeader>
+              <div className="mt-4 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+                <span>{selectedMatch.char_count} Zeichen</span>
+                <span>{selectedMatch.word_count} Wörter</span>
+                <span>chunk {selectedMatch.chunk_id.slice(0, 8)}</span>
+                <span>essay {selectedMatch.essay_id.slice(0, 8)}</span>
+              </div>
+              <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                {selectedMatch.content}
+              </p>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </main>
   );
 }
