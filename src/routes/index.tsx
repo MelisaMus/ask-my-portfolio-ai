@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { askPortfolio, searchPortfolio } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { embedTextLocally } from "@/lib/local-embeddings";
 import {
   Sheet,
   SheetContent,
@@ -84,6 +85,8 @@ function Index() {
   // Im Test-Modus geklickter Treffer -> Detail-Sidepanel
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Fortschritt des lokalen Embedding-Modells (Download/Berechnung)
+  const [modelStatus, setModelStatus] = useState<string | null>(null);
 
   // Expanded full-essay content, keyed by essay_id
   const [openEssayId, setOpenEssayId] = useState<string | null>(null);
