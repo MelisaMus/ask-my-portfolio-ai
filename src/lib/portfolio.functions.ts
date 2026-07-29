@@ -130,7 +130,10 @@ const UpdateSchema = z.object({
 export const updateEssay = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => UpdateSchema.parse(data))
   .handler(async ({ data }) => {
+    const { requireAdmin } = await import("./admin-gate.server");
+    await requireAdmin();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
 
     const title = data.title.trim();
     const content = data.content.trim();
