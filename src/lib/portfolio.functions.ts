@@ -147,6 +147,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
       answer,
       sources: sources.map((s, i) => ({
         ref: i + 1,
+        essay_id: s.essay_id,
         title: s.title,
         source: s.source,
         excerpt: s.content.length > 240 ? s.content.slice(0, 240) + "…" : s.content,
@@ -154,3 +155,4 @@ export const askPortfolio = createServerFn({ method: "POST" })
       })),
     };
   });
+

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { askPortfolio, ingestEssay } from "@/lib/portfolio.functions";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -9,12 +10,14 @@ export const Route = createFileRoute("/")({
       { title: "Ask my Portfolio" },
       {
         name: "description",
-        content: "RAG-basierter Chatbot für eigene Essays – Frage stellen, Antwort mit Quellenangabe erhalten.",
+        content:
+          "RAG-basierter Chatbot für eigene Essays – Frage stellen, Antwort mit Quellenangabe erhalten.",
       },
       { property: "og:title", content: "Ask my Portfolio" },
       {
         property: "og:description",
-        content: "RAG-basierter Chatbot für eigene Essays – Frage stellen, Antwort mit Quellenangabe erhalten.",
+        content:
+          "RAG-basierter Chatbot für eigene Essays – Frage stellen, Antwort mit Quellenangabe erhalten.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -25,6 +28,7 @@ export const Route = createFileRoute("/")({
 
 type Source = {
   ref: number;
+  essay_id: string;
   title: string;
   source: string | null;
   excerpt: string;
@@ -42,6 +46,11 @@ function Index() {
   const [sources, setSources] = useState<Source[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Expanded full-essay content, keyed by essay_id
+  const [openEssayId, setOpenEssayId] = useState<string | null>(null);
+  const [essayCache, setEssayCache] = useState<Record<string, string>>({});
+  const [loadingEssayId, setLoadingEssayId] = useState<string | null>(null);
+
   // Ingest state
   const [showIngest, setShowIngest] = useState(false);
   const [title, setTitle] = useState("");
@@ -57,6 +66,7 @@ function Index() {
     setError(null);
     setAnswer(null);
     setSources([]);
+    setOpenEssayId(null);
     try {
       const res = await ask({ data: { question } });
       setAnswer(res.answer);
@@ -65,6 +75,27 @@ function Index() {
       setError(err instanceof Error ? err.message : "Fehler");
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Toggle full-text view for a source; lazy-load the essay content.
+  async function toggleEssay(essayId: string) {
+    if (openEssayId === essayId) {
+      setOpenEssayId(null);
+      return;
+    }
+    setOpenEssayId(essayId);
+    if (!essayCache[essayId]) {
+      setLoadingEssayId(essayId);
+      const { data, error: err } = await supabase
+        .from("essays")
+        .select("content")
+        .eq("id", essayId)
+        .single();
+      if (!err && data) {
+        setEssayCache((c) => ({ ...c, [essayId]: data.content }));
+      }
+      setLoadingEssayId(null);
     }
   }
 
@@ -133,22 +164,43 @@ function Index() {
                 Quellen
               </h2>
               <ol className="space-y-3">
-                {sources.map((s) => (
-                  <li key={s.ref} className="rounded-md border border-border bg-background p-3 text-sm">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <p className="font-medium text-foreground">
-                        [{s.ref}] {s.title}
-                        {s.source && (
-                          <span className="ml-2 font-normal text-muted-foreground">— {s.source}</span>
-                        )}
-                      </p>
-                      <span className="text-xs text-muted-foreground">
-                        {(s.similarity * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    <p className="mt-1 text-muted-foreground">"{s.excerpt}"</p>
-                  </li>
-                ))}
+                {sources.map((s) => {
+                  const isOpen = openEssayId === s.essay_id;
+                  return (
+                    <li key={s.ref} className="rounded-md border border-border bg-background p-3 text-sm">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <p className="font-medium">
+                          <span className="text-muted-foreground">[{s.ref}] </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleEssay(s.essay_id)}
+                            className="text-primary underline underline-offset-4 hover:opacity-80"
+                          >
+                            {s.title}
+                          </button>
+                          {s.source && (
+                            <span className="ml-2 font-normal text-muted-foreground">— {s.source}</span>
+                          )}
+                        </p>
+                        <span className="text-xs text-muted-foreground">
+                          {(s.similarity * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">"{s.excerpt}"</p>
+                      {isOpen && (
+                        <div className="mt-3 rounded-md border border-border bg-muted/40 p-3 text-sm">
+                          {loadingEssayId === s.essay_id && !essayCache[s.essay_id] ? (
+                            <p className="text-muted-foreground">Lade Volltext…</p>
+                          ) : (
+                            <p className="whitespace-pre-wrap leading-relaxed text-foreground">
+                              {essayCache[s.essay_id]}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ol>
             </div>
           )}
