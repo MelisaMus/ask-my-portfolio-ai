@@ -414,11 +414,23 @@ function Index() {
             <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Antwort
               {isFallback && (
-                <span className="rounded border border-border px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-muted-foreground">
+                <span
+                  className={`rounded border px-1.5 py-0.5 text-[10px] normal-case tracking-normal ${
+                    // Kontingentgrenze = erwartet; alles andere = echter Fehler.
+                    fallbackKind === "credit_limit" || fallbackKind === "rate_limit"
+                      ? "border-border text-muted-foreground"
+                      : "border-destructive/50 text-destructive"
+                  }`}
+                  title={fallbackReason ?? undefined}
+                >
                   Ohne LLM · Auszüge aus den Texten
+                  {fallbackKind ? ` · ${fallbackKind}` : ""}
                 </span>
               )}
             </h2>
+            {isFallback && fallbackReason && (
+              <p className="mb-3 text-xs text-muted-foreground">Grund: {fallbackReason}</p>
+            )}
 
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{answer}</p>
 
