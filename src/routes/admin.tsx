@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { deleteEssay, ingestEssay, updateEssay } from "@/lib/portfolio.functions";
+import { getAdminStatus, lockAdmin, unlockAdmin } from "@/lib/admin-gate.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { chunkText, embedManyLocally } from "@/lib/local-embeddings";
 
@@ -24,7 +25,7 @@ export const Route = createFileRoute("/admin")({
       { name: "twitter:card", content: "summary" },
     ],
   }),
-  component: Admin,
+  component: AdminPage,
 });
 
 type EssayRow = { id: string; title: string; source: string | null; created_at: string };
@@ -46,7 +47,7 @@ type Status =
   | { kind: "ok"; text: string }
   | { kind: "err"; text: string };
 
-function Admin() {
+function AdminPanel() {
   const ingest = useServerFn(ingestEssay);
   const update = useServerFn(updateEssay);
   const remove = useServerFn(deleteEssay);
@@ -402,5 +403,114 @@ function Admin() {
         )}
       </section>
     </main>
+  );
+}
+
+/**
+ * Passwort-Gate: Die Admin-Oberfläche wird erst nach Eingabe des Admin-Passworts
+ * gerendert. Die eigentliche Absicherung passiert serverseitig – ingestEssay,
+ * updateEssay und deleteEssay verlangen eine freigeschaltete Session.
+ */
+function AdminPage() {
+  const status = useServerFn(getAdminStatus);
+  const unlock = useServerFn(unlockAdmin);
+  const lock = useServerFn(lockAdmin);
+
+  const [state, setState] = useState<"loading" | "locked" | "unlocked" | "unconfigured">("loading");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void status()
+      .then((s) => setState(!s.configured ? "unconfigured" : s.unlocked ? "unlocked" : "locked"))
+      .catch(() => setState("locked"));
+  }, []);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await unlock({ data: { password } });
+      if (res.ok) {
+        setPassword("");
+        setState("unlocked");
+      } else {
+        setError("Falsches Passwort.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Freischalten fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (state === "loading") {
+    return <main className="mx-auto max-w-md px-4 py-16 text-sm text-muted-foreground">Lade…</main>;
+  }
+
+  if (state === "unconfigured") {
+    return (
+      <main className="mx-auto max-w-md px-4 py-16">
+        <h1 className="text-xl font-semibold text-foreground">Admin gesperrt</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Es ist kein Admin-Passwort hinterlegt. Bitte das Secret ADMIN_PASSWORD setzen.
+        </p>
+        <Link to="/" className="mt-4 inline-block text-sm text-primary underline underline-offset-4">
+          ← Zurück zum Chat
+        </Link>
+      </main>
+    );
+  }
+
+  if (state === "locked") {
+    return (
+      <main className="mx-auto max-w-md px-4 py-16">
+        <h1 className="text-xl font-semibold text-foreground">Admin – Passwort</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Diese Ansicht verwaltet die Essays im RAG-Index und ist passwortgeschützt.
+        </p>
+        <form onSubmit={onSubmit} className="mt-6 space-y-3">
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Admin-Passwort"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <button
+            type="submit"
+            disabled={busy || !password}
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {busy ? "Prüfe…" : "Entsperren"}
+          </button>
+        </form>
+        <Link to="/" className="mt-6 inline-block text-sm text-primary underline underline-offset-4">
+          ← Zurück zum Chat
+        </Link>
+      </main>
+    );
+  }
+
+  return (
+    <>
+      <div className="mx-auto flex max-w-3xl justify-end px-4 pt-4">
+        <button
+          type="button"
+          onClick={async () => {
+            await lock();
+            setState("locked");
+          }}
+          className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+        >
+          Sperren
+        </button>
+      </div>
+      <AdminPanel />
+    </>
   );
 }
