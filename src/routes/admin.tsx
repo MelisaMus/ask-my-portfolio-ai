@@ -80,6 +80,7 @@ function Admin() {
   async function runIngest(attempt: number) {
     const payload = pending.current;
     if (!payload) return;
+    cancelled.current = true; // laufenden Countdown stoppen
     setStatus({ kind: "running", attempt });
     try {
       // Ingest = Chunking (Absätze) -> Embedding je Chunk -> Insert in essay_chunks.
