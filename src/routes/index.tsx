@@ -433,13 +433,17 @@ function Index() {
                           )}
                           <span className="ml-2 font-normal text-muted-foreground">
                             · Absatz {s.chunk_index + 1}
+                            {s.chunk_total > 0 && <span>/{s.chunk_total}</span>}
                           </span>
                         </p>
                         <span className="text-xs text-muted-foreground">
                           {(s.similarity * 100).toFixed(0)}%
                         </span>
                       </div>
-                      <p className="mt-1 text-muted-foreground">"{s.excerpt}"</p>
+                      {/* Kurzes Zitat zum jeweiligen Treffer, klar als Blockzitat formatiert */}
+                      <blockquote className="mt-2 border-l-2 border-primary/30 pl-3 italic text-muted-foreground">
+                        „{s.excerpt}“
+                      </blockquote>
                       {isOpen && (
                         <div className="mt-3 rounded-md border border-border bg-muted/40 p-3 text-sm">
                           {loadingEssayId === s.essay_id && !essayCache[s.essay_id] ? (
