@@ -424,10 +424,20 @@ export const askPortfolio = createServerFn({ method: "POST" })
       const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
       if (!answer.trim()) throw new Error("Leere LLM-Antwort");
       return { answer, fallback: false, sources: sourceList };
-    } catch {
+    } catch (err) {
       // 4. Fallback: kein LLM verfügbar (Credit-/Rate-Limit) -> extraktive
       // Zusammenfassung direkt aus den gefundenen Absätzen, inkl. Quellen.
-      return { answer: extractiveAnswer(data.question, sources), fallback: true, sources: sourceList };
+      // Grund serverseitig loggen, damit echte Bugs nicht stillschweigend
+      // als "Credit-Limit" durchgehen.
+      console.error("[askPortfolio] LLM-Aufruf fehlgeschlagen:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      return {
+        answer: extractiveAnswer(data.question, sources),
+        fallback: true,
+        fallback_reason: reason,
+        sources: sourceList,
+      };
     }
+
   });
 
