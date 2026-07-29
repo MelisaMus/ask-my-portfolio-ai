@@ -1,9 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { askPortfolio, searchPortfolio } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { embedTextLocally } from "@/lib/local-embeddings";
+import {
+  clearHistory,
+  loadHistory,
+  retrievalQuery,
+  saveHistory,
+  HISTORY_FOR_LLM,
+  type ChatTurn,
+} from "@/lib/chat-history";
+
 import {
   Sheet,
   SheetContent,
@@ -103,9 +112,21 @@ function Index() {
   const [openEssayId, setOpenEssayId] = useState<string | null>(null);
   const [essayCache, setEssayCache] = useState<Record<string, string>>({});
   const [loadingEssayId, setLoadingEssayId] = useState<string | null>(null);
+  // Chatverlauf: EINE fortlaufende Unterhaltung, nur im Browser gespeichert.
+  const [history, setHistory] = useState<ChatTurn[]>([]);
+  // Erst nach dem Mount lesen -> keine Hydration-Abweichung.
+  useEffect(() => {
+    setHistory(loadHistory());
+  }, []);
 
-
-
+  function resetConversation() {
+    clearHistory();
+    setHistory([]);
+    setAnswer(null);
+    setSources([]);
+    setContextPreview([]);
+    setMatches([]);
+  }
 
   async function onAsk(e: React.FormEvent) {
     e.preventDefault();
@@ -122,8 +143,11 @@ function Index() {
     setOpenEssayId(null);
     try {
       // Schritt 0: Frage lokal im Browser embedden (MiniLM, 384 Dim.).
+      // Bei Follow-ups fließt die vorherige Frage in den Suchtext ein,
+      // damit die Vektorsuche auch "und warum?" sinnvoll auflöst.
+      const searchText = testMode ? question : retrievalQuery(question, history);
       setModelStatus("Modell wird geladen…");
-      const embedding = await embedTextLocally(question, setModelStatus);
+      const embedding = await embedTextLocally(searchText, setModelStatus);
       setModelStatus(null);
 
       if (testMode) {
@@ -140,14 +164,39 @@ function Index() {
         // Threshold wie der Ask-Aufruf, also identische Auswahl.
         const pre = await search({ data: { question, embedding, threshold } });
         setContextPreview(pre.matches);
-        // Schritt 2: eigentliche RAG-Antwort (retrievt serverseitig erneut).
-        const res = await ask({ data: { question, embedding, threshold } });
+        // Schritt 2: eigentliche RAG-Antwort. Die letzten Turns gehen als
+        // Gesprächskontext mit, damit Follow-ups Bezüge auflösen können.
+        const res = await ask({
+          data: {
+            question,
+            embedding,
+            threshold,
+            history: history.slice(-HISTORY_FOR_LLM).map((t) => ({
+              question: t.question,
+              answer: t.answer,
+            })),
+          },
+        });
         setAnswer(res.answer);
         setIsFallback(res.fallback);
         // Grund des Fallbacks transparent machen (Limit vs. echter Fehler).
         setFallbackReason("fallback_reason" in res ? (res.fallback_reason as string) : null);
         setFallbackKind("fallback_kind" in res ? (res.fallback_kind as string) : null);
         setSources(res.sources);
+
+        // Turn im Verlauf ablegen (localStorage) und Eingabefeld leeren.
+        const next = [
+          ...history,
+          {
+            id: `${Date.now()}`,
+            question,
+            answer: res.answer,
+            at: Date.now(),
+          },
+        ];
+        setHistory(next);
+        saveHistory(next);
+        setQuestion("");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
@@ -156,6 +205,7 @@ function Index() {
       setLoading(false);
     }
   }
+
 
 
   // Exportiert die aktuellen Retrieval-Treffer (inkl. Similarity-Scores) als JSON-Datei.
@@ -218,6 +268,38 @@ function Index() {
           Stell eine Frage – die Antwort stammt aus meiner Essay-Sammlung, mit Quellenangabe.
         </p>
       </header>
+
+      {/* Chatverlauf (eine Unterhaltung, nur in diesem Browser gespeichert) */}
+      {history.length > 0 && (
+        <section className="mb-8">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Verlauf · {history.length} {history.length === 1 ? "Frage" : "Fragen"}
+              <span className="ml-1 normal-case">
+                (die letzten {HISTORY_FOR_LLM} gehen als Kontext mit)
+              </span>
+            </h2>
+            <button
+              type="button"
+              onClick={resetConversation}
+              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              Neu starten
+            </button>
+          </div>
+          <ol className="space-y-3">
+            {history.map((t) => (
+              <li key={t.id} className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <p className="font-medium text-foreground">{t.question}</p>
+                <p className="mt-1 whitespace-pre-wrap leading-relaxed text-muted-foreground">
+                  {t.answer}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
 
       <form onSubmit={onAsk} className="space-y-3">
         <textarea
