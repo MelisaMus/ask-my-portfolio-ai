@@ -1,0 +1,1 @@
+DELETE FROM public.essays WHERE title = 'Testessay lokal';
