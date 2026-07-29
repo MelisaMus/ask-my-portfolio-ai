@@ -113,6 +113,9 @@ function Index() {
     setLoading(true);
     setError(null);
     setAnswer(null);
+    setIsFallback(false);
+    setFallbackReason(null);
+    setFallbackKind(null);
     setSources([]);
     setMatches([]);
     setContextPreview([]);
