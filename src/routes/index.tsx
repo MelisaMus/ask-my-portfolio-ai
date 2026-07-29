@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { askPortfolio, searchPortfolio } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { embedTextLocally } from "@/lib/local-embeddings";
 import {
   Sheet,
   SheetContent,
@@ -84,6 +85,8 @@ function Index() {
   // Im Test-Modus geklickter Treffer -> Detail-Sidepanel
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Fortschritt des lokalen Embedding-Modells (Download/Berechnung)
+  const [modelStatus, setModelStatus] = useState<string | null>(null);
 
   // Expanded full-essay content, keyed by essay_id
   const [openEssayId, setOpenEssayId] = useState<string | null>(null);
@@ -104,27 +107,34 @@ function Index() {
     setContextPreview([]);
     setOpenEssayId(null);
     try {
+      // Schritt 0: Frage lokal im Browser embedden (MiniLM, 384 Dim.).
+      setModelStatus("Modell wird geladen…");
+      const embedding = await embedTextLocally(question, setModelStatus);
+      setModelStatus(null);
+
       if (testMode) {
         // Retrieval-only: skip the LLM, show raw top-5 chunks + similarity scores.
-        const res = await search({ data: { question, threshold } });
+        const res = await search({ data: { question, embedding, threshold } });
         setMatches(res.matches);
         setRetrieved(res.retrieved);
       } else {
         // Schritt 1: Retrieval separat ausführen, damit die Kontext-Absätze
         // schon sichtbar sind, bevor das LLM antwortet.
-        const pre = await search({ data: { question, threshold: 0 } });
+        const pre = await search({ data: { question, embedding, threshold: 0 } });
         setContextPreview(pre.matches);
         // Schritt 2: eigentliche RAG-Antwort (retrievt serverseitig erneut).
-        const res = await ask({ data: { question } });
+        const res = await ask({ data: { question, embedding } });
         setAnswer(res.answer);
         setSources(res.sources);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
     } finally {
+      setModelStatus(null);
       setLoading(false);
     }
   }
+
 
   // Exportiert die aktuellen Retrieval-Treffer (inkl. Similarity-Scores) als JSON-Datei.
   function downloadMatchesJson() {
@@ -201,8 +211,9 @@ function Index() {
             disabled={loading || !question.trim()}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            {loading ? "Suche in Essays…" : testMode ? "Nur Retrieval testen" : "Senden"}
+            {loading ? (modelStatus ?? "Suche in Essays…") : testMode ? "Nur Retrieval testen" : "Senden"}
           </button>
+
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
