@@ -440,7 +440,14 @@ export const askPortfolio = createServerFn({ method: "POST" })
 
     // Ohne API-Key gar nicht erst das Gateway aufrufen -> direkt extraktiv antworten.
     if (!key) {
-      return { answer: extractiveAnswer(data.question, sources), fallback: true, sources: sourceList };
+      console.warn("[askPortfolio] kein API-Key konfiguriert – extraktiver Fallback");
+      return {
+        answer: extractiveAnswer(data.question, sources, "kein API-Key konfiguriert"),
+        fallback: true,
+        fallback_kind: "missing_key" as LlmFailureKind,
+        fallback_reason: "Es ist kein KI-API-Key konfiguriert.",
+        sources: sourceList,
+      };
     }
 
     // 3. Build a grounded prompt and ask the LLM to cite by [n]
