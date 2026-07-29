@@ -118,17 +118,31 @@ function Index() {
     }
   }
 
-  async function onIngest(e: React.FormEvent) {
+  async function onIngest(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
+    // Read values directly from the form so programmatic fills work even when
+    // React state updates are not triggered by automated input events.
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const ingestTitle = String(formData.get("title") || "").trim();
+    const ingestSource = String(formData.get("source") || "").trim();
+    const ingestContent = String(formData.get("content") || "").trim();
+    if (!ingestTitle || !ingestContent) return;
     setIngesting(true);
     setIngestMsg(null);
     try {
-      const res = await ingest({ data: { title, content, source: source || null } });
+      const res = await ingest({
+        data: {
+          title: ingestTitle,
+          content: ingestContent,
+          source: ingestSource || null,
+        },
+      });
       setIngestMsg({
         kind: "ok",
         text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.`,
       });
+      form.reset();
       setTitle("");
       setSource("");
       setContent("");
@@ -292,18 +306,21 @@ function Index() {
 
         <form onSubmit={onIngest} className="mt-4 space-y-3">
           <input
+            name="title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Titel"
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
           <input
+            name="source"
             value={source}
             onChange={(e) => setSource(e.target.value)}
             placeholder="Quelle (z. B. InZeitung 2024)"
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
           <textarea
+            name="content"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="Volltext (Absätze durch Leerzeilen trennen)"
@@ -318,7 +335,7 @@ function Index() {
           )}
           <button
             type="submit"
-            disabled={ingesting || !title.trim() || !content.trim()}
+            disabled={ingesting}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
