@@ -27,14 +27,69 @@ const OPENAI_MODEL = "gpt-4o-mini";
 /** Dimension des lokalen MiniLM-Modells – muss zu vector(384) passen. */
 const EMBEDDING_DIM = 384;
 
-/** Map gateway HTTP errors to messages the UI can show directly. */
-function gatewayError(status: number, body: string): Error {
-  if (status === 429) return new Error("Zu viele Anfragen an die KI – bitte kurz warten und erneut versuchen.");
-  if (status === 401) return new Error("Der hinterlegte OpenAI-API-Key ist ungültig.");
-  if (status === 402 || status === 403)
-    return new Error("KI-Guthaben/Limit ist erreicht. Bitte Guthaben aufladen.");
-  return new Error(`KI-Dienst-Fehler ${status}: ${body.slice(0, 200)}`);
+/**
+ * Fehlerklassen im LLM-Pfad. Wichtig: ein Credit-/Kontingent-Problem ist etwas
+ * anderes als ein echter API-, Netzwerk- oder Bugfehler – nur so lassen sich
+ * Fehler im Log auseinanderhalten statt von einem Catch-all maskiert zu werden.
+ */
+export type LlmFailureKind =
+  | "credit_limit" // 402/403: Guthaben oder Workspace-Limit erschöpft
+  | "rate_limit" // 429: zu viele Anfragen
+  | "auth" // 401: Key ungültig/abgelaufen
+  | "bad_request" // 4xx: Prompt/Modell/Payload fehlerhaft -> unser Bug
+  | "provider_error" // 5xx beim Anbieter
+  | "network" // DNS/TLS/Verbindung abgebrochen
+  | "timeout" // Antwort kam nicht rechtzeitig
+  | "empty_response" // HTTP 200, aber kein verwertbarer Text
+  | "unknown"; // alles andere -> immer verdächtig, nie als Limit deuten
+
+/** Nur diese Klassen sind "erwartete" Kontingentgrenzen, kein Defekt. */
+const QUOTA_KINDS = new Set<LlmFailureKind>(["credit_limit", "rate_limit"]);
+
+/** Fehler mit Klassifikation, damit UI und Logging denselben Grund kennen. */
+class LlmError extends Error {
+  constructor(
+    readonly kind: LlmFailureKind,
+    message: string,
+    /** HTTP-Status, sofern es überhaupt eine Antwort gab. */
+    readonly status?: number,
+    /** Gekürzter Rohtext der Anbieter-Antwort – nur fürs Log. */
+    readonly detail?: string,
+  ) {
+    super(message);
+    this.name = "LlmError";
+  }
 }
+
+/** HTTP-Fehlerantwort -> klassifizierter Fehler mit UI-tauglichem Text. */
+function httpFailure(status: number, body: string): LlmError {
+  const detail = body.slice(0, 500);
+  if (status === 429)
+    return new LlmError("rate_limit", "Zu viele Anfragen an die KI – bitte kurz warten und erneut versuchen.", status, detail);
+  if (status === 401 || status === 403)
+    // 403 bedeutet beim Lovable-Gateway "Workspace-Limit", bei OpenAI dagegen
+    // ein Key-/Berechtigungsproblem – deshalb am Antworttext unterscheiden.
+    return /credit|quota|limit|billing/i.test(body)
+      ? new LlmError("credit_limit", "KI-Guthaben/Limit ist erreicht. Bitte Guthaben aufladen.", status, detail)
+      : new LlmError("auth", "Der hinterlegte API-Key ist ungültig oder nicht berechtigt.", status, detail);
+  if (status === 402)
+    return new LlmError("credit_limit", "KI-Guthaben/Limit ist erreicht. Bitte Guthaben aufladen.", status, detail);
+  if (status >= 500)
+    return new LlmError("provider_error", `Der KI-Dienst antwortet gerade nicht (Fehler ${status}).`, status, detail);
+  return new LlmError("bad_request", `Fehlerhafte Anfrage an den KI-Dienst (${status}).`, status, detail);
+}
+
+/** Ausnahme aus fetch()/JSON-Parsing -> klassifizierter Fehler. */
+function transportFailure(err: unknown): LlmError {
+  if (err instanceof LlmError) return err;
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError"))
+    return new LlmError("timeout", "Der KI-Dienst hat nicht rechtzeitig geantwortet.", undefined, message);
+  if (err instanceof TypeError)
+    return new LlmError("network", "Der KI-Dienst war nicht erreichbar (Netzwerkfehler).", undefined, message);
+  return new LlmError("unknown", `Unerwarteter Fehler im KI-Pfad: ${message}`, undefined, message);
+}
+
 
 
 const VectorSchema = z.array(z.number()).length(EMBEDDING_DIM);
