@@ -73,6 +73,9 @@ function Index() {
   const [loading, setLoading] = useState(false);
   const [testMode, setTestMode] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
+  // true, wenn die Antwort ohne LLM (extraktiver Fallback) erzeugt wurde
+  const [isFallback, setIsFallback] = useState(false);
+
   const [sources, setSources] = useState<Source[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   // Konfigurierbarer Similarity-Threshold: Treffer darunter werden verworfen.
