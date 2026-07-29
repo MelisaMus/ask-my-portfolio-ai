@@ -140,10 +140,31 @@ export const searchPortfolio = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
     const all = (matches ?? []) as MatchRow[];
+    const filtered = all.filter((m) => m.similarity >= threshold);
+
+    // Debug-Metadaten: Gesamtzahl der Absätze je Essay, damit die UI
+    // "Absatz 3 von 12" statt nur "Absatz 3" anzeigen kann.
+    const essayIds = [...new Set(filtered.map((m) => m.essay_id))];
+    const totals: Record<string, number> = {};
+    await Promise.all(
+      essayIds.map(async (id) => {
+        const { count } = await supabaseAdmin
+          .from("essay_chunks")
+          .select("id", { count: "exact", head: true })
+          .eq("essay_id", id);
+        totals[id] = count ?? 0;
+      }),
+    );
+
     return {
       threshold,
       retrieved: all.length,
-      matches: all.filter((m) => m.similarity >= threshold),
+      matches: filtered.map((m) => ({
+        ...m,
+        chunk_total: totals[m.essay_id] ?? 0,
+        char_count: m.content.length,
+        word_count: m.content.trim().split(/\s+/).filter(Boolean).length,
+      })),
     };
   });
 
