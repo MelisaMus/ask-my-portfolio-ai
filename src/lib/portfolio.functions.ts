@@ -393,11 +393,32 @@ function extractiveAnswer(question: string, sources: MatchRow[], reason?: string
 export const askPortfolio = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => AskSchema.parse(data))
   .handler(async ({ data }) => {
+    // 0. Rate-Limit pro IP: schützt vor unbeabsichtigten LLM-Kosten.
+    const { checkRateLimit } = await import("./rate-limit.server");
+    const rl = await checkRateLimit("ask", ASK_RATE_LIMIT);
+    if (!rl.allowed) {
+      const mins = Math.ceil(rl.retryAfterSeconds / 60);
+      console.warn(`[askPortfolio] rate limit erreicht count=${rl.count}/${rl.limit}`);
+      return {
+        answer:
+          `Zu viele Anfragen: Es sind maximal ${rl.limit} Fragen pro ` +
+          `${ASK_RATE_LIMIT.windowSeconds / 60} Minuten möglich. ` +
+          `Bitte in ca. ${mins} Minute${mins === 1 ? "" : "n"} erneut versuchen.`,
+        fallback: true,
+        fallback_kind: "rate_limit" as LlmFailureKind,
+        fallback_reason: `Limit von ${rl.limit} Anfragen pro Zeitfenster erreicht.`,
+        rate_limited: true,
+        retry_after_seconds: rl.retryAfterSeconds,
+        sources: [],
+      };
+    }
+
     // Eigener OpenAI-Key hat Vorrang; sonst Fallback auf das Lovable AI Gateway.
     const openaiKey = process.env.OPENAI_API_KEY;
     const key = openaiKey ?? process.env.LOVABLE_API_KEY;
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
 
 
     // 1. Frage-Embedding kommt fertig aus dem Browser (lokales MiniLM).
