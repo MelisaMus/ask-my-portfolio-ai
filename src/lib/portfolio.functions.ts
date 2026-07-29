@@ -41,6 +41,7 @@ export type LlmFailureKind =
   | "network" // DNS/TLS/Verbindung abgebrochen
   | "timeout" // Antwort kam nicht rechtzeitig
   | "empty_response" // HTTP 200, aber kein verwertbarer Text
+  | "missing_key" // gar kein Key hinterlegt – Konfigurationsproblem
   | "unknown"; // alles andere -> immer verdächtig, nie als Limit deuten
 
 /** Nur diese Klassen sind "erwartete" Kontingentgrenzen, kein Defekt. */
