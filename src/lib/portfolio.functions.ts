@@ -369,14 +369,16 @@ export const askPortfolio = createServerFn({ method: "POST" })
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
 
     try {
-      const chatRes = await fetch(`${GATEWAY_URL}/chat/completions`, {
+      const baseUrl = openaiKey ? OPENAI_URL : GATEWAY_URL;
+      const model = openaiKey ? OPENAI_MODEL : CHAT_MODEL;
+      const chatRes = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify({
-          model: CHAT_MODEL,
+          model,
           messages: [
             { role: "system", content: systemPrompt },
             {
@@ -387,6 +389,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
         }),
       });
       if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
+
       const chatJson = await chatRes.json();
       const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
       if (!answer.trim()) throw new Error("Leere LLM-Antwort");
