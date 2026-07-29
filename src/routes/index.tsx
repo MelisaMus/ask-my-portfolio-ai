@@ -104,27 +104,34 @@ function Index() {
     setContextPreview([]);
     setOpenEssayId(null);
     try {
+      // Schritt 0: Frage lokal im Browser embedden (MiniLM, 384 Dim.).
+      setModelStatus("Modell wird geladen…");
+      const embedding = await embedTextLocally(question, setModelStatus);
+      setModelStatus(null);
+
       if (testMode) {
         // Retrieval-only: skip the LLM, show raw top-5 chunks + similarity scores.
-        const res = await search({ data: { question, threshold } });
+        const res = await search({ data: { question, embedding, threshold } });
         setMatches(res.matches);
         setRetrieved(res.retrieved);
       } else {
         // Schritt 1: Retrieval separat ausführen, damit die Kontext-Absätze
         // schon sichtbar sind, bevor das LLM antwortet.
-        const pre = await search({ data: { question, threshold: 0 } });
+        const pre = await search({ data: { question, embedding, threshold: 0 } });
         setContextPreview(pre.matches);
         // Schritt 2: eigentliche RAG-Antwort (retrievt serverseitig erneut).
-        const res = await ask({ data: { question } });
+        const res = await ask({ data: { question, embedding } });
         setAnswer(res.answer);
         setSources(res.sources);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
     } finally {
+      setModelStatus(null);
       setLoading(false);
     }
   }
+
 
   // Exportiert die aktuellen Retrieval-Treffer (inkl. Similarity-Scores) als JSON-Datei.
   function downloadMatchesJson() {
