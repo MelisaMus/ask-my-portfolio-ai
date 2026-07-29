@@ -125,12 +125,18 @@ function Index() {
     setIngestMsg(null);
     try {
       const res = await ingest({ data: { title, content, source: source || null } });
-      setIngestMsg(`Essay gespeichert, ${res.chunk_count} Absätze eingebettet.`);
+      setIngestMsg({
+        kind: "ok",
+        text: `Essay gespeichert, ${res.chunk_count} Absätze eingebettet.`,
+      });
       setTitle("");
       setSource("");
       setContent("");
     } catch (err) {
-      setIngestMsg(err instanceof Error ? err.message : "Fehler beim Einfügen");
+      setIngestMsg({
+        kind: "err",
+        text: err instanceof Error ? err.message : "Fehler beim Einfügen",
+      });
     } finally {
       setIngesting(false);
     }
