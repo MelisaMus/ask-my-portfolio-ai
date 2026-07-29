@@ -122,21 +122,24 @@ function Index() {
       setModelStatus(null);
 
       if (testMode) {
-        // Retrieval-only: skip the LLM, show raw top-5 chunks + similarity scores.
+        // Retrieval-only: kein LLM, dafür exakt die Chunk-Auswahl,
+        // die der Chat mit demselben Threshold als Kontext nutzen würde.
         const res = await search({ data: { question, embedding, threshold } });
         setMatches(res.matches);
         setRetrieved(res.retrieved);
+        setAboveCount(res.above_count);
+        setFilled(res.filled);
       } else {
         // Schritt 1: Retrieval separat ausführen, damit die Kontext-Absätze
-        // schon sichtbar sind, bevor das LLM antwortet.
-        const pre = await search({ data: { question, embedding, threshold: 0 } });
+        // schon sichtbar sind, bevor das LLM antwortet – mit demselben
+        // Threshold wie der Ask-Aufruf, also identische Auswahl.
+        const pre = await search({ data: { question, embedding, threshold } });
         setContextPreview(pre.matches);
         // Schritt 2: eigentliche RAG-Antwort (retrievt serverseitig erneut).
-        const res = await ask({ data: { question, embedding } });
+        const res = await ask({ data: { question, embedding, threshold } });
         setAnswer(res.answer);
         setIsFallback(res.fallback);
         setSources(res.sources);
-
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
