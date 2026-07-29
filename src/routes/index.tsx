@@ -139,6 +139,9 @@ function Index() {
         const res = await ask({ data: { question, embedding, threshold } });
         setAnswer(res.answer);
         setIsFallback(res.fallback);
+        // Grund des Fallbacks transparent machen (Limit vs. echter Fehler).
+        setFallbackReason("fallback_reason" in res ? (res.fallback_reason as string) : null);
+        setFallbackKind("fallback_kind" in res ? (res.fallback_kind as string) : null);
         setSources(res.sources);
       }
     } catch (err) {
