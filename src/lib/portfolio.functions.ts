@@ -258,6 +258,15 @@ const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
 const MIN_CONTEXT_CHUNKS = 3;
 /** Obergrenze der Kontext-Chunks (Top-k aus der Vektorsuche). */
 const MATCH_COUNT = 5;
+/**
+ * Wie viele Chunks die Vektorsuche liefert, BEVOR wir auf MATCH_COUNT kürzen.
+ * Mehr Kandidaten sind nötig, damit die Diversitäts-Regel (unten) überhaupt
+ * Alternativen aus anderen Essays zur Auswahl hat.
+ */
+const CANDIDATE_COUNT = MATCH_COUNT * 4;
+/** Max. Chunks aus demselben Essay – verhindert, dass ein Text alles belegt. */
+const MAX_PER_ESSAY = 2;
+
 
 const AskSchema = z.object({
   question: z.string().min(2),
@@ -287,24 +296,46 @@ type MatchRow = {
 };
 
 /**
+ * Diversitäts-Regel: pro Essay höchstens MAX_PER_ESSAY Chunks in der ersten
+ * Runde. Übrige Chunks werden hinten angehängt, damit die Liste bei wenigen
+ * Essays trotzdem voll wird. Ergebnis: Antworten stützen sich auf mehrere
+ * Texte statt auf fünf Absätze desselben Essays.
+ */
+function diversify(rows: MatchRow[]): MatchRow[] {
+  const perEssay: Record<string, number> = {};
+  const primary: MatchRow[] = [];
+  const overflow: MatchRow[] = [];
+  for (const row of rows) {
+    const used = perEssay[row.essay_id] ?? 0;
+    if (used < MAX_PER_ESSAY) {
+      perEssay[row.essay_id] = used + 1;
+      primary.push(row);
+    } else {
+      overflow.push(row);
+    }
+  }
+  return [...primary, ...overflow];
+}
+
+/**
  * EINE gemeinsame Auswahlregel für Test-Modus und Chat, damit der Threshold-
  * Regler exakt das zeigt, was der Chat später ans LLM schickt:
  * alles über dem Threshold, aber nie weniger als MIN_CONTEXT_CHUNKS
- * (sonst hätte das LLM gar keinen Kontext).
+ * (sonst hätte das LLM gar keinen Kontext) – anschließend nach Quellen
+ * diversifiziert und auf MATCH_COUNT gekürzt.
  */
 function selectContext(all: MatchRow[], threshold: number) {
   const above = all.filter((m) => m.similarity >= threshold);
-  const selected = (above.length >= MIN_CONTEXT_CHUNKS ? above : all.slice(0, MIN_CONTEXT_CHUNKS)).slice(
-    0,
-    MATCH_COUNT,
-  );
+  const pool = above.length >= MIN_CONTEXT_CHUNKS ? above : all.slice(0, MIN_CONTEXT_CHUNKS);
+  const selected = diversify(pool).slice(0, MATCH_COUNT);
   return {
     selected,
     aboveCount: above.length,
     // true = es wurden Chunks UNTER dem Threshold ergänzt, um auf das Minimum zu kommen
-    filled: above.length < selected.length,
+    filled: selected.some((m) => m.similarity < threshold),
   };
 }
+
 
 /** Absatz-Gesamtzahl je Essay – eine Abfrage statt einer pro Essay (N+1). */
 async function chunkTotals(
@@ -334,7 +365,8 @@ export const searchPortfolio = createServerFn({ method: "POST" })
     const threshold = data.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
       query_embedding: JSON.stringify(data.embedding) as unknown as string,
-      match_count: MATCH_COUNT,
+      match_count: CANDIDATE_COUNT,
+
     });
     if (error) throw new Error(error.message);
     const all = (matches ?? []) as MatchRow[];
@@ -402,7 +434,24 @@ function extractiveAnswer(question: string, sources: MatchRow[], reason?: string
 
 }
 
+/**
+ * Zitat-Korrektur: LLMs erfinden gern Absatznummern ("[3, Absatz 1]", obwohl
+ * Quelle 3 Absatz 9 ist). Wir kennen die echte Nummer aus den Metadaten und
+ * überschreiben sie – unbekannte Quellennummern werden entfernt.
+ */
+function fixCitations(answer: string, sources: MatchRow[]): string {
+  return answer.replace(/\[\s*(\d+)\s*(?:,\s*Absatz\s*(\d+)\s*)?\]/gi, (match, refStr, paraStr) => {
+    const ref = Number(refStr);
+    const src = sources[ref - 1];
+    if (!src) return ""; // Verweis auf eine Quelle, die es nicht gibt
+    if (!paraStr) return `[${ref}]`;
+    // Absatznummer immer aus den Metadaten, nie aus dem Modell.
+    return `[${ref}, Absatz ${src.chunk_index + 1}]`;
+  });
+}
+
 export const askPortfolio = createServerFn({ method: "POST" })
+
   .inputValidator((data: unknown) => AskSchema.parse(data))
   .handler(async ({ data }) => {
     // 0. Rate-Limit pro IP: schützt vor unbeabsichtigten LLM-Kosten.
@@ -438,7 +487,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
     const threshold = data.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
       query_embedding: JSON.stringify(data.embedding) as unknown as string,
-      match_count: MATCH_COUNT,
+      match_count: CANDIDATE_COUNT,
     });
     if (error) throw new Error(error.message);
 
@@ -484,18 +533,27 @@ export const askPortfolio = createServerFn({ method: "POST" })
       };
     }
 
-    // 3. Build a grounded prompt and ask the LLM to cite by [n]
+    // 3. Grounded Prompt: Jeder Ausschnitt trägt seine ECHTE Absatznummer,
+
+    //    damit das LLM sie nicht erfinden muss ("[3, Absatz 1]" obwohl es
+    //    Absatz 9 war). Die Nummern werden danach zusätzlich validiert.
     const context = sources
-      .map((s, i) => `[${i + 1}] "${s.title}"${s.source ? ` (${s.source})` : ""}\n${s.content}`)
+      .map((s, i) => {
+        const total = totals[s.essay_id] ?? 0;
+        const para = `Absatz ${s.chunk_index + 1}${total ? ` von ${total}` : ""}`;
+        return `[${i + 1}] "${s.title}"${s.source ? ` (${s.source})` : ""} · ${para}\n${s.content}`;
+      })
       .join("\n\n---\n\n");
 
     const systemPrompt =
       "Du beantwortest Fragen ausschließlich auf Grundlage der bereitgestellten Textausschnitte aus einer Essay-Sammlung. " +
       "Antworte auf Deutsch, präzise und in 2-5 Sätzen. Zitiere die verwendeten Quellen mit [1], [2] etc. " +
-      "Nutze dabei die mitgelieferte Absatz-Information, z. B. [1, Absatz 3], wenn du auf einen konkreten Absatz verweist. " +
+      "Die Absatznummer steht in der Kopfzeile jedes Ausschnitts; wenn du sie nennst, übernimm sie EXAKT " +
+      "(z. B. [3, Absatz 9]). Erfinde niemals eine andere Absatznummer und nenne im Zweifel nur [3]. " +
       "Der bisherige Gesprächsverlauf dient nur dazu, Follow-up-Fragen und Bezüge zu verstehen – " +
       "inhaltliche Aussagen stützt du weiterhin ausschließlich auf die Textausschnitte. " +
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
+
 
     // Bisherige Turns als echte Chat-Nachrichten -> Follow-ups verstehen Bezüge.
     const historyMessages = (data.history ?? []).flatMap((t) => [
@@ -536,14 +594,17 @@ export const askPortfolio = createServerFn({ method: "POST" })
       const chatJson = (await chatRes.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };
-      const answer = chatJson.choices?.[0]?.message?.content ?? "";
-      if (!answer.trim())
+      const raw = chatJson.choices?.[0]?.message?.content ?? "";
+      if (!raw.trim())
         throw new LlmError("empty_response", "Die KI hat keine verwertbare Antwort geliefert.", 200);
+      // Inline-Zitate gegen die echten Metadaten prüfen und ggf. korrigieren.
+      const answer = fixCitations(raw, sources);
 
       console.info(
         `[askPortfolio] ok provider=${provider} model=${model} ms=${Date.now() - startedAt} chunks=${sources.length}`,
       );
       return { answer, fallback: false, sources: sourceList };
+
     } catch (err) {
       // 4. Fallback: extraktive Antwort aus den gefundenen Absätzen.
       // Jeder Fehler wird klassifiziert geloggt – Kontingentgrenzen als warn,

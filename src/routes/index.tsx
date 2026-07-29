@@ -287,8 +287,10 @@ function Index() {
               Neu starten
             </button>
           </div>
+          {/* Der aktuelle Turn steht schon unten im Antwort-Block –
+              hier also nur die vorherigen Turns, sonst doppelt. */}
           <ol className="space-y-3">
-            {history.map((t) => (
+            {(answer ? history.slice(0, -1) : history).map((t) => (
               <li key={t.id} className="rounded-md border border-border bg-muted/30 p-3 text-sm">
                 <p className="font-medium text-foreground">{t.question}</p>
                 <p className="mt-1 whitespace-pre-wrap leading-relaxed text-muted-foreground">
@@ -297,6 +299,7 @@ function Index() {
               </li>
             ))}
           </ol>
+
         </section>
       )}
 
