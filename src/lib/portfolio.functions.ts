@@ -365,7 +365,8 @@ export const searchPortfolio = createServerFn({ method: "POST" })
     const threshold = data.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
       query_embedding: JSON.stringify(data.embedding) as unknown as string,
-      match_count: MATCH_COUNT,
+      match_count: CANDIDATE_COUNT,
+
     });
     if (error) throw new Error(error.message);
     const all = (matches ?? []) as MatchRow[];
