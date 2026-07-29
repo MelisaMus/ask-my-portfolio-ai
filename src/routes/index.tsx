@@ -69,7 +69,7 @@ function Index() {
   const [source, setSource] = useState("");
   const [content, setContent] = useState("");
   const [ingesting, setIngesting] = useState(false);
-  const [ingestMsg, setIngestMsg] = useState<string | null>(null);
+  const [ingestMsg, setIngestMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   async function onAsk(e: React.FormEvent) {
     e.preventDefault();
