@@ -50,16 +50,34 @@ export const ingestEssay = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
+    const title = data.title.trim();
+    const content = data.content.trim();
+
+    // Duplicate guard: reject if an essay with the same (case-insensitive) title
+    // OR identical content already exists. Prevents accidental re-ingestion,
+    // which would otherwise duplicate embeddings in the RAG index.
+    const { data: existing, error: dupErr } = await supabaseAdmin
+      .from("essays")
+      .select("id, title")
+      .or(`title.ilike.${title.replace(/,/g, "")},content.eq.${content.replace(/,/g, " ")}`)
+      .limit(1);
+    if (dupErr) throw new Error(dupErr.message);
+    if (existing && existing.length > 0) {
+      throw new Error(
+        `Dieses Essay existiert bereits ("${existing[0].title}"). Ingest abgebrochen, keine doppelten Chunks erzeugt.`,
+      );
+    }
+
     // 1. Store the essay itself
     const { data: essay, error: essayErr } = await supabaseAdmin
       .from("essays")
-      .insert({ title: data.title, content: data.content, source: data.source ?? null })
+      .insert({ title, content, source: data.source ?? null })
       .select("id")
       .single();
     if (essayErr || !essay) throw new Error(essayErr?.message ?? "Insert failed");
 
     // 2. Chunk + embed each paragraph, then persist with a foreign-key link
-    const chunks = chunkText(data.content);
+    const chunks = chunkText(content);
     const rows = [];
     for (let i = 0; i < chunks.length; i++) {
       const vector = await embed(chunks[i]);
@@ -67,7 +85,7 @@ export const ingestEssay = createServerFn({ method: "POST" })
         essay_id: essay.id,
         chunk_index: i,
         content: chunks[i],
-        embedding: vector as unknown as string, // pgvector accepts array via supabase-js
+        embedding: vector as unknown as string,
       });
     }
     const { error: chunkErr } = await supabaseAdmin.from("essay_chunks").insert(rows);
