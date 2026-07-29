@@ -56,15 +56,16 @@ export const ingestEssay = createServerFn({ method: "POST" })
     // Duplicate guard: reject if an essay with the same (case-insensitive) title
     // OR identical content already exists. Prevents accidental re-ingestion,
     // which would otherwise duplicate embeddings in the RAG index.
-    const { data: existing, error: dupErr } = await supabaseAdmin
-      .from("essays")
-      .select("id, title")
-      .or(`title.ilike.${title.replace(/,/g, "")},content.eq.${content.replace(/,/g, " ")}`)
-      .limit(1);
-    if (dupErr) throw new Error(dupErr.message);
-    if (existing && existing.length > 0) {
+    const [byTitle, byContent] = await Promise.all([
+      supabaseAdmin.from("essays").select("id, title").ilike("title", title).limit(1),
+      supabaseAdmin.from("essays").select("id, title").eq("content", content).limit(1),
+    ]);
+    if (byTitle.error) throw new Error(byTitle.error.message);
+    if (byContent.error) throw new Error(byContent.error.message);
+    const dup = byTitle.data?.[0] ?? byContent.data?.[0];
+    if (dup) {
       throw new Error(
-        `Dieses Essay existiert bereits ("${existing[0].title}"). Ingest abgebrochen, keine doppelten Chunks erzeugt.`,
+        `Dieses Essay existiert bereits ("${dup.title}"). Ingest abgebrochen, keine doppelten Chunks erzeugt.`,
       );
     }
 
