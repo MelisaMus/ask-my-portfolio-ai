@@ -43,7 +43,17 @@ type Match = {
   chunk_index: number;
   content: string;
   similarity: number;
+  // Debug-Metadaten aus searchPortfolio
+  chunk_total: number;
+  char_count: number;
+  word_count: number;
 };
+
+/** Kürzt einen Absatz für die Debug-Vorschau auf ein Zeichenlimit. */
+const EXCERPT_LIMIT = 280;
+function excerptOf(text: string) {
+  return text.length <= EXCERPT_LIMIT ? text : `${text.slice(0, EXCERPT_LIMIT).trimEnd()}…`;
+}
 
 function Index() {
   const ask = useServerFn(askPortfolio);
@@ -62,6 +72,7 @@ function Index() {
   const [retrieved, setRetrieved] = useState(0);
   // Vorschau der Absätze, die im normalen Modus als Kontext ans LLM gehen.
   const [contextPreview, setContextPreview] = useState<Match[]>([]);
+  const [expandedChunkId, setExpandedChunkId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Expanded full-essay content, keyed by essay_id
@@ -123,7 +134,10 @@ function Index() {
         title: m.title,
         source: m.source,
         chunk_index: m.chunk_index,
+        chunk_position: `${m.chunk_index + 1}/${m.chunk_total}`,
         similarity: m.similarity,
+        char_count: m.char_count,
+        word_count: m.word_count,
         content: m.content,
       })),
     };
@@ -287,17 +301,37 @@ function Index() {
                     {m.source && (
                       <span className="ml-2 font-normal text-muted-foreground">— {m.source}</span>
                     )}
-                    <span className="ml-2 font-normal text-muted-foreground">
-                      · Absatz {m.chunk_index + 1}
-                    </span>
                   </p>
                   <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
                     {m.similarity.toFixed(4)}
                   </span>
                 </div>
+                {/* Debug-Metadaten: Position im Essay, Länge, Chunk-ID */}
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+                  <span>
+                    Absatz {m.chunk_index + 1}/{m.chunk_total}
+                  </span>
+                  <span>{m.char_count} Zeichen</span>
+                  <span>{m.word_count} Wörter</span>
+                  <span>chunk {m.chunk_id.slice(0, 8)}</span>
+                  <span>essay {m.essay_id.slice(0, 8)}</span>
+                </div>
                 <p className="mt-2 whitespace-pre-wrap leading-relaxed text-foreground">
-                  {m.content}
+                  {expandedChunkId === m.chunk_id ? m.content : excerptOf(m.content)}
                 </p>
+                {m.content.length > EXCERPT_LIMIT && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedChunkId(expandedChunkId === m.chunk_id ? null : m.chunk_id)
+                    }
+                    className="mt-1 text-xs text-primary underline underline-offset-4 hover:opacity-80"
+                  >
+                    {expandedChunkId === m.chunk_id
+                      ? "Auszug anzeigen"
+                      : `Vollen Absatz anzeigen (${m.char_count} Zeichen)`}
+                  </button>
+                )}
               </li>
             ))}
           </ol>
