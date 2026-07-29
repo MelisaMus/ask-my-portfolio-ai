@@ -211,8 +211,9 @@ function Index() {
             disabled={loading || !question.trim()}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            {loading ? "Suche in Essays…" : testMode ? "Nur Retrieval testen" : "Senden"}
+            {loading ? (modelStatus ?? "Suche in Essays…") : testMode ? "Nur Retrieval testen" : "Senden"}
           </button>
+
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
