@@ -26,6 +26,9 @@ const OPENAI_URL = "https://api.openai.com/v1";
 const OPENAI_MODEL = "gpt-4o-mini";
 /** Dimension des lokalen MiniLM-Modells – muss zu vector(384) passen. */
 const EMBEDDING_DIM = 384;
+/** Rate-Limit für die Chat-Route: N Fragen pro IP und Zeitfenster. */
+const ASK_RATE_LIMIT = { max: 20, windowSeconds: 10 * 60 };
+
 
 /**
  * Fehlerklassen im LLM-Pfad. Wichtig: ein Credit-/Kontingent-Problem ist etwas
