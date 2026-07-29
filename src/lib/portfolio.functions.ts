@@ -244,7 +244,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
         ],
       }),
     });
-    if (!chatRes.ok) throw new Error(`Chat failed: ${chatRes.status} ${await chatRes.text()}`);
+    if (!chatRes.ok) throw gatewayError(chatRes.status, await chatRes.text());
     const chatJson = await chatRes.json();
     const answer: string = chatJson.choices?.[0]?.message?.content ?? "";
 
