@@ -318,6 +318,20 @@ export const askPortfolio = createServerFn({ method: "POST" })
       };
     }
 
+    // Gesamtzahl der Absätze pro Essay ermitteln, damit die UI
+    // "Absatz 3/12" anstatt nur "Absatz 3" anzeigen kann.
+    const essayIds = [...new Set(sources.map((s) => s.essay_id))];
+    const totals: Record<string, number> = {};
+    await Promise.all(
+      essayIds.map(async (id) => {
+        const { count } = await supabaseAdmin
+          .from("essay_chunks")
+          .select("id", { count: "exact", head: true })
+          .eq("essay_id", id);
+        totals[id] = count ?? 0;
+      }),
+    );
+
     const sourceList = sources.map((s, i) => ({
       ref: i + 1,
       essay_id: s.essay_id,
@@ -325,6 +339,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
       source: s.source,
       // Absatz-Referenz (0-basiert im Index -> 1-basiert für die Anzeige)
       chunk_index: s.chunk_index,
+      chunk_total: totals[s.essay_id] ?? 0,
       excerpt: s.content.length > 240 ? s.content.slice(0, 240) + "…" : s.content,
       similarity: s.similarity,
     }));
