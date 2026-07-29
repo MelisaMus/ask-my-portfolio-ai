@@ -3,6 +3,13 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { askPortfolio, searchPortfolio } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 export const Route = createFileRoute("/")({
   head: () => ({
