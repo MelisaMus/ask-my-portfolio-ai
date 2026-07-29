@@ -77,6 +77,8 @@ function Index() {
   const [answer, setAnswer] = useState<string | null>(null);
   // true, wenn die Antwort ohne LLM (extraktiver Fallback) erzeugt wurde
   const [isFallback, setIsFallback] = useState(false);
+  const [fallbackReason, setFallbackReason] = useState<string | null>(null);
+  const [fallbackKind, setFallbackKind] = useState<string | null>(null);
 
   const [sources, setSources] = useState<Source[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
