@@ -52,7 +52,6 @@ function Index() {
   const [loadingEssayId, setLoadingEssayId] = useState<string | null>(null);
 
   // Ingest state
-  const [showIngest, setShowIngest] = useState(false);
   const [title, setTitle] = useState("");
   const [source, setSource] = useState("");
   const [content, setContent] = useState("");
