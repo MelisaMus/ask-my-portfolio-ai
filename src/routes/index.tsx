@@ -209,46 +209,49 @@ function Index() {
       <hr className="my-12 border-border" />
 
       <section>
-        <button
-          type="button"
-          onClick={() => setShowIngest((v) => !v)}
-          className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-        >
-          {showIngest ? "Essay-Eingabe schließen" : "Essay hinzufügen"}
-        </button>
+        <h2 className="text-lg font-semibold text-foreground">Essay hinzufügen</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Titel, optionale Quelle und Volltext eintragen. Absätze werden per Leerzeile getrennt,
+          jeder Absatz wird eingebettet und in den RAG-Index geschrieben.
+        </p>
 
-        {showIngest && (
-          <form onSubmit={onIngest} className="mt-4 space-y-3">
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Titel"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-            <input
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder="Quelle (z. B. InZeitung 2024)"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Volltext (Absätze durch Leerzeilen trennen)"
-              rows={10}
-              className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-            <button
-              type="submit"
-              disabled={ingesting || !title.trim() || !content.trim()}
-              className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-            >
-              {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
-            </button>
-            {ingestMsg && <p className="text-xs text-muted-foreground">{ingestMsg}</p>}
-          </form>
-        )}
+        <form onSubmit={onIngest} className="mt-4 space-y-3">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Titel"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          <input
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+            placeholder="Quelle (z. B. InZeitung 2024)"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Volltext (Absätze durch Leerzeilen trennen)"
+            rows={12}
+            className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          {content.trim() && (
+            <p className="text-xs text-muted-foreground">
+              Vorschau: {content.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).length}{" "}
+              Absätze werden als Chunks eingebettet.
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={ingesting || !title.trim() || !content.trim()}
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
+          </button>
+          {ingestMsg && <p className="text-xs text-muted-foreground">{ingestMsg}</p>}
+        </form>
       </section>
+
     </main>
   );
 }
