@@ -60,6 +60,8 @@ function Index() {
   // Konfigurierbarer Similarity-Threshold: Treffer darunter werden verworfen.
   const [threshold, setThreshold] = useState(0.3);
   const [retrieved, setRetrieved] = useState(0);
+  // Vorschau der Absätze, die im normalen Modus als Kontext ans LLM gehen.
+  const [contextPreview, setContextPreview] = useState<Match[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Expanded full-essay content, keyed by essay_id
@@ -82,6 +84,7 @@ function Index() {
     setAnswer(null);
     setSources([]);
     setMatches([]);
+    setContextPreview([]);
     setOpenEssayId(null);
     try {
       if (testMode) {
@@ -90,6 +93,11 @@ function Index() {
         setMatches(res.matches);
         setRetrieved(res.retrieved);
       } else {
+        // Schritt 1: Retrieval separat ausführen, damit die Kontext-Absätze
+        // schon sichtbar sind, bevor das LLM antwortet.
+        const pre = await search({ data: { question, threshold: 0 } });
+        setContextPreview(pre.matches);
+        // Schritt 2: eigentliche RAG-Antwort (retrievt serverseitig erneut).
         const res = await ask({ data: { question } });
         setAnswer(res.answer);
         setSources(res.sources);
@@ -251,6 +259,42 @@ function Index() {
                   </span>
                 </div>
                 <p className="mt-2 whitespace-pre-wrap leading-relaxed text-foreground">
+                  {m.content}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {!testMode && contextPreview.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Kontext für das LLM ({contextPreview.length} Absätze)
+            {loading && " · Antwort wird erzeugt…"}
+          </h2>
+          <ol className="space-y-2">
+            {contextPreview.map((m, i) => (
+              <li
+                key={m.chunk_id}
+                className="rounded-md border border-border bg-muted/30 p-3 text-xs"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="font-medium text-foreground">
+                    <span className="text-muted-foreground">[{i + 1}] </span>
+                    {m.title}
+                    {m.source && (
+                      <span className="ml-2 font-normal text-muted-foreground">— {m.source}</span>
+                    )}
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      · Absatz {m.chunk_index + 1}
+                    </span>
+                  </p>
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
+                    {m.similarity.toFixed(3)}
+                  </span>
+                </div>
+                <p className="mt-1 line-clamp-3 leading-relaxed text-muted-foreground">
                   {m.content}
                 </p>
               </li>
