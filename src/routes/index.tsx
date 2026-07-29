@@ -109,6 +109,34 @@ function Index() {
     }
   }
 
+  // Exportiert die aktuellen Retrieval-Treffer (inkl. Similarity-Scores) als JSON-Datei.
+  function downloadMatchesJson() {
+    const payload = {
+      question,
+      threshold,
+      retrieved,
+      generated_at: new Date().toISOString(),
+      matches: matches.map((m, i) => ({
+        rank: i + 1,
+        chunk_id: m.chunk_id,
+        essay_id: m.essay_id,
+        title: m.title,
+        source: m.source,
+        chunk_index: m.chunk_index,
+        similarity: m.similarity,
+        content: m.content,
+      })),
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `retrieval-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // Toggle full-text view for a source; lazy-load the essay content.
   async function toggleEssay(essayId: string) {
     if (openEssayId === essayId) {
@@ -237,9 +265,18 @@ function Index() {
 
       {matches.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Retrieval-Ergebnisse · {matches.length}/{retrieved} über Threshold {threshold.toFixed(2)}
-          </h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Retrieval-Ergebnisse · {matches.length}/{retrieved} über Threshold {threshold.toFixed(2)}
+            </h2>
+            <button
+              type="button"
+              onClick={downloadMatchesJson}
+              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              JSON herunterladen
+            </button>
+          </div>
           <ol className="space-y-3">
             {matches.map((m, i) => (
               <li key={m.chunk_id} className="rounded-md border border-border bg-background p-3 text-sm">
