@@ -80,6 +80,8 @@ function Index() {
   // Vorschau der Absätze, die im normalen Modus als Kontext ans LLM gehen.
   const [contextPreview, setContextPreview] = useState<Match[]>([]);
   const [expandedChunkId, setExpandedChunkId] = useState<string | null>(null);
+  // Im Test-Modus geklickter Treffer -> Detail-Sidepanel
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Expanded full-essay content, keyed by essay_id
