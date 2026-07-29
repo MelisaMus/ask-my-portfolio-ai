@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.hit_rate_limit(text, text, integer, integer) FROM anon, authenticated;
