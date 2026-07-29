@@ -2,18 +2,25 @@
  * RAG server functions for "Ask my Portfolio".
  *
  * Pipeline:
- *   1. ingestEssay: split essay into paragraph chunks -> embed each chunk
- *      via Lovable AI Gateway -> store text + vector in `essay_chunks`.
- *   2. askPortfolio: embed the user's question -> pgvector cosine similarity
- *      search (`match_essay_chunks`) -> pass top matches + question to an LLM
- *      -> return the model's answer plus the source chunks (title/source/excerpt).
+ *   1. Client (Browser): Essay in Absätze chunken und für jeden Absatz mit dem
+ *      lokalen MiniLM-Modell (`Xenova/all-MiniLM-L6-v2`, 384 Dimensionen) ein
+ *      Embedding erzeugen – siehe `src/lib/local-embeddings.ts`.
+ *   2. ingestEssay: nimmt Text + fertige Vektoren entgegen und speichert
+ *      beides in `essays` / `essay_chunks`.
+ *   3. searchPortfolio / askPortfolio: bekommen das (ebenfalls lokal erzeugte)
+ *      Frage-Embedding, machen die pgvector-Cosine-Similarity-Suche
+ *      (`match_essay_chunks`) und – bei askPortfolio – die LLM-Antwort.
+ *
+ * Embeddings kosten damit kein AI-Gateway-Guthaben; nur die LLM-Antwort
+ * läuft weiterhin über das Gateway.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1";
-const EMBED_MODEL = "openai/text-embedding-3-small"; // 1536 dims -> matches vector(1536) column
 const CHAT_MODEL = "google/gemini-3.6-flash";
+/** Dimension des lokalen MiniLM-Modells – muss zu vector(384) passen. */
+const EMBEDDING_DIM = 384;
 
 /** Map gateway HTTP errors to messages the UI can show directly. */
 function gatewayError(status: number, body: string): Error {
@@ -23,22 +30,7 @@ function gatewayError(status: number, body: string): Error {
   return new Error(`KI-Dienst-Fehler ${status}: ${body.slice(0, 200)}`);
 }
 
-async function embed(text: string): Promise<number[]> {
-  const key = process.env.LOVABLE_API_KEY;
-  if (!key) throw new Error("Missing LOVABLE_API_KEY");
-  const res = await fetch(`${GATEWAY_URL}/embeddings`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({ model: EMBED_MODEL, input: text }),
-  });
-  if (!res.ok) throw gatewayError(res.status, await res.text());
-  const json = await res.json();
-  return json.data[0].embedding as number[];
-}
-
+const VectorSchema = z.array(z.number()).length(EMBEDDING_DIM);
 
 /** Split an essay into paragraphs. Empty lines are the boundary. */
 function chunkText(content: string): string[] {
@@ -52,6 +44,8 @@ const IngestSchema = z.object({
   title: z.string().min(1),
   content: z.string().min(20),
   source: z.string().optional().nullable(),
+  /** Ein lokal erzeugter Vektor pro Absatz, in derselben Reihenfolge. */
+  embeddings: z.array(VectorSchema).min(1),
 });
 
 export const ingestEssay = createServerFn({ method: "POST" })
@@ -78,17 +72,16 @@ export const ingestEssay = createServerFn({ method: "POST" })
       );
     }
 
-    // 1. Chunk + embed FIRST, before touching the DB. If any embedding fails
-    //    (rate limit, credit exhaustion, provider 5xx), we abort *before*
-    //    inserting the essay row — no orphan rows without chunks remain.
+    // Chunking serverseitig wiederholen und gegen die Vektoranzahl prüfen,
+    // damit Text und Embedding garantiert zusammenpassen.
     const chunks = chunkText(content);
     if (chunks.length === 0) throw new Error("Kein Absatz erkannt.");
-    const vectors: number[][] = [];
-    for (const c of chunks) {
-      vectors.push(await embed(c));
+    if (chunks.length !== data.embeddings.length) {
+      throw new Error(
+        `Anzahl Absätze (${chunks.length}) und Embeddings (${data.embeddings.length}) stimmen nicht überein.`,
+      );
     }
 
-    // 2. Insert essay + chunks only after every embedding succeeded.
     const { data: essay, error: essayErr } = await supabaseAdmin
       .from("essays")
       .insert({ title, content, source: data.source ?? null })
@@ -100,7 +93,7 @@ export const ingestEssay = createServerFn({ method: "POST" })
       essay_id: essay.id,
       chunk_index: i,
       content: text,
-      embedding: vectors[i] as unknown as string,
+      embedding: JSON.stringify(data.embeddings[i]) as unknown as string,
     }));
     const { error: chunkErr } = await supabaseAdmin.from("essay_chunks").insert(rows);
     if (chunkErr) {
@@ -112,13 +105,17 @@ export const ingestEssay = createServerFn({ method: "POST" })
     return { essay_id: essay.id, chunk_count: rows.length };
   });
 
-const AskSchema = z.object({ question: z.string().min(2) });
+const AskSchema = z.object({
+  question: z.string().min(2),
+  embedding: VectorSchema,
+});
 
 /** Default cosine-similarity cutoff for retrieval (0 = alles, 1 = identisch). */
 const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
 
 const SearchSchema = z.object({
   question: z.string().min(2),
+  embedding: VectorSchema,
   threshold: z.number().min(0).max(1).optional(),
 });
 
@@ -133,18 +130,16 @@ type MatchRow = {
 };
 
 /**
- * Retrieval-only variant: embed the question, return the top-5 chunks with
- * similarity scores. Useful for debugging the RAG index without invoking the LLM.
- * Treffer unterhalb des konfigurierbaren Thresholds werden herausgefiltert.
+ * Retrieval-only variant: nimmt das lokal erzeugte Frage-Embedding und liefert
+ * die Top-5 Chunks samt Similarity-Score, ohne das LLM aufzurufen.
  */
 export const searchPortfolio = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => SearchSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const threshold = data.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
-    const queryEmbedding = await embed(data.question);
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
-      query_embedding: queryEmbedding as unknown as string,
+      query_embedding: JSON.stringify(data.embedding) as unknown as string,
       match_count: 5,
     });
     if (error) throw new Error(error.message);
@@ -184,31 +179,20 @@ export const askPortfolio = createServerFn({ method: "POST" })
     if (!key) throw new Error("Missing LOVABLE_API_KEY");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    // 1. Embed the question
-    const queryEmbedding = await embed(data.question);
-
+    // 1. Frage-Embedding kommt fertig aus dem Browser (lokales MiniLM).
     // 2. Retrieve top-5 most similar chunks via pgvector cosine similarity
     const { data: matches, error } = await supabaseAdmin.rpc("match_essay_chunks", {
-      query_embedding: queryEmbedding as unknown as string,
+      query_embedding: JSON.stringify(data.embedding) as unknown as string,
       match_count: 5,
     });
     if (error) throw new Error(error.message);
 
-    const allMatches = (matches ?? []) as Array<{
-      chunk_id: string;
-      essay_id: string;
-      title: string;
-      source: string | null;
-      chunk_index: number;
-      content: string;
-      similarity: number;
-    }>;
+    const allMatches = (matches ?? []) as MatchRow[];
 
     // Keep the 3-5 best chunks: everything above the similarity threshold,
     // but always at least the top 3 so the LLM never runs without context.
     const relevant = allMatches.filter((m) => m.similarity >= DEFAULT_SIMILARITY_THRESHOLD);
     const sources = (relevant.length >= 3 ? relevant : allMatches.slice(0, 3)).slice(0, 5);
-
 
     if (sources.length === 0) {
       return {
@@ -262,4 +246,3 @@ export const askPortfolio = createServerFn({ method: "POST" })
       })),
     };
   });
-
