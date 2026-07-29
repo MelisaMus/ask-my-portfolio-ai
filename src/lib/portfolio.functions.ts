@@ -357,6 +357,7 @@ export const askPortfolio = createServerFn({ method: "POST" })
     const systemPrompt =
       "Du beantwortest Fragen ausschließlich auf Grundlage der bereitgestellten Textausschnitte aus einer Essay-Sammlung. " +
       "Antworte auf Deutsch, präzise und in 2-5 Sätzen. Zitiere die verwendeten Quellen mit [1], [2] etc. " +
+      "Nutze dabei die mitgelieferte Absatz-Information, z. B. [1, Absatz 3], wenn du auf einen konkreten Absatz verweist. " +
       "Wenn die Ausschnitte die Frage nicht beantworten, sage das ehrlich.";
 
     try {
