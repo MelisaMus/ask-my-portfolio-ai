@@ -323,7 +323,17 @@ function Index() {
           >
             {ingesting ? "Wird eingebettet…" : "Essay einbetten & speichern"}
           </button>
-          {ingestMsg && <p className="text-xs text-muted-foreground">{ingestMsg}</p>}
+          {ingestMsg && (
+            <p
+              className={
+                ingestMsg.kind === "ok"
+                  ? "rounded-md border border-primary/30 bg-primary/10 p-3 text-sm text-foreground"
+                  : "rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+              }
+            >
+              {ingestMsg.text}
+            </p>
+          )}
         </form>
       </section>
 
