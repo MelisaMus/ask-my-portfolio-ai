@@ -172,12 +172,53 @@ export const searchPortfolio = createServerFn({ method: "POST" })
     };
   });
 
+/**
+ * Extraktiver Fallback ohne LLM.
+ * Wird genutzt, wenn das AI Gateway nicht verfügbar ist (Credit-Limit, Rate-Limit,
+ * fehlender Key). Statt einer generierten Formulierung werden die relevantesten
+ * Sätze der gefundenen Absätze zu einer kurzen Zusammenfassung montiert –
+ * jeweils mit Quellen-Referenz [n].
+ */
+function extractiveAnswer(question: string, sources: MatchRow[]): string {
+  // Frage-Stichwörter (ohne Kurzwörter) für ein simples Keyword-Scoring der Sätze.
+  const terms = question
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 3);
+
+  const lines = sources.map((s, i) => {
+    const sentences = s.content
+      .split(/(?<=[.!?])\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length > 30);
+    const scored = sentences
+      .map((sentence) => {
+        const lower = sentence.toLowerCase();
+        const score = terms.reduce((acc, t) => acc + (lower.includes(t) ? 1 : 0), 0);
+        return { sentence, score };
+      })
+      .sort((a, b) => b.score - a.score);
+    // Bester Satz, sonst Anfang des Absatzes als Auszug.
+    const best =
+      scored[0]?.score > 0
+        ? scored[0].sentence
+        : (sentences[0] ?? s.content).slice(0, 220).trim();
+    return `„${best}“ [${i + 1}]`;
+  });
+
+  return (
+    "Hinweis: Die KI-Antwort ist derzeit nicht verfügbar (Credit-Limit). " +
+    "Hier stattdessen die passendsten Stellen direkt aus den Texten:\n\n" +
+    lines.join("\n\n")
+  );
+}
+
 export const askPortfolio = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => AskSchema.parse(data))
   .handler(async ({ data }) => {
     const key = process.env.LOVABLE_API_KEY;
-    if (!key) throw new Error("Missing LOVABLE_API_KEY");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
 
     // 1. Frage-Embedding kommt fertig aus dem Browser (lokales MiniLM).
     // 2. Retrieve top-5 most similar chunks via pgvector cosine similarity
