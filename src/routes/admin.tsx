@@ -1,9 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
-import { ingestEssay } from "@/lib/portfolio.functions";
+import { deleteEssay, ingestEssay, updateEssay } from "@/lib/portfolio.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { chunkText, embedManyLocally } from "@/lib/local-embeddings";
+
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
