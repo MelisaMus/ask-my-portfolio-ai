@@ -6,7 +6,7 @@ Ein kleiner RAG-Chatbot, der Fragen zu einer persönlichen Essay-Sammlung beantw
 
 Statt Essays selbst zu durchsuchen, kann man fragen wie:
 
-- „Welcher Text handelt von Wechseljahren?"
+- „Welcher Text handelt von Parität?"
 - „Zeig mir Stellen über Migration."
 
 Das System sucht semantisch (nicht per Stichwort) in den eigenen Texten, formuliert eine Antwort und nennt die verwendeten Quellen. Klick auf den Titel öffnet den Volltext des Essays.
