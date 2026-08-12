@@ -17,7 +17,7 @@ Retrieval-Augmented Generation in vier Schritten:
 
 ### 1. Chunking
 
-Beim Einfügen eines Essays wird der Volltext an Leerzeilen in Absätze zerlegt (`src/lib/portfolio.functions.ts` → `chunkText`). Ein Absatz ist die Retrieval-Einheit – klein genug für gezielte Treffer, groß genug, um Kontext zu tragen.
+Beim Einfügen eines Essays wird der Volltext an Leerzeilen in Absätze zerlegt (`src/lib/chunking.ts` → `chunkText`). Ein Absatz ist die Retrieval-Einheit – klein genug für gezielte Treffer, groß genug, um Kontext zu tragen.
 
 ### 2. Embedding
 
@@ -57,13 +57,17 @@ Public Read via RLS, Schreibzugriff nur über die Server-Function `ingestEssay` 
 src/
 ├── routes/
 │   ├── __root.tsx              # Layout + Head-Meta
-│   └── index.tsx               # UI: Frage, Antwort, Quellen, Ingest-Form
+│   ├── index.tsx               # UI: Chat + Quellen
+│   └── admin.tsx               # Admin: Ingest + CRUD
 ├── lib/
-│   └── portfolio.functions.ts  # ingestEssay + askPortfolio (RAG-Kern)
+│   ├── portfolio.functions.ts  # ingestEssay + askPortfolio (RAG-Kern)
+│   ├── chunking.ts             # chunkText + intelligenter Chunking
+│   ├── local-embeddings.ts     # browserseitiges Embedding
+│   └── chat-history.ts         # lokaler Chat-Verlauf
 └── integrations/supabase/      # Auto-generierte Clients (Cloud)
 ```
 
-Die gesamte RAG-Logik lebt in **`src/lib/portfolio.functions.ts`** – dort sind `chunkText`, `embed`, `ingestEssay` und `askPortfolio` kommentiert und übersichtlich hintereinander.
+Die gesamte RAG-Logik lebt in **`src/lib/portfolio.functions.ts`** – dort sind `ingestEssay` und `askPortfolio` kommentiert und übersichtlich hintereinander.
 
 ## Lokal starten
 
@@ -82,4 +86,8 @@ Benötigte Env-Variablen (bei Lovable Cloud automatisch gesetzt):
 
 ## Essays einfügen
 
-Unten auf der Seite auf **„Essay hinzufügen"** klicken, dann Titel, Quelle und Volltext eintragen (Absätze durch Leerzeilen trennen). Beim Speichern wird jeder Absatz automatisch embedded und indexiert.
+Im Admin-Bereich (`/admin`) auf **„Essay hinzufügen"** klicken, dann Titel, Quelle und Volltext eintragen (Absätze durch Leerzeilen trennen). Beim Speichern wird jeder Absatz automatisch embedded und indexiert.
+
+## Admin-Zugang
+
+Der Admin-Bereich ist passwortgeschützt. Das Passwort wird über `ADMIN_PASSWORD` konfiguriert und in einer verschlüsselten Cookie-Session gespeichert.
